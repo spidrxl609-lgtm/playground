@@ -1106,8 +1106,8 @@ function buildHollow() {
 }
 
 /* ============================== 8. SCENES ============================== */
-/* A scene = static geometry + lighting env + walkable rects + colliders + camera zones + interactables.
-   registerScene(id, { name, env, build(env) -> { group, walk, colliders, zones, interactables, spawns, menuCam, update } }) */
+/* A scene = static geometry + lighting env + walkable rects + colliders + interactables + triggers.
+   registerScene(id, { name, env, build(env) -> { group, walk, colliders, interactables, triggers, spawns, mirror, onEnter, update } }) */
 const SCENES = {};
 function registerScene(id, def) { SCENES[id] = def; }
 
