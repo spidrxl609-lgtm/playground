@@ -113,6 +113,31 @@
   body[data-cine="1"] #ui .bar { height: 8%; }
   body[data-cine="1"] #dialogue { bottom: 9%; }
   #btnA { font-size: 17px; letter-spacing: 1px; }
+
+  /* ---- health / stamina HUD, death screen, chapter cards, combat buttons ---- */
+  #hud { position: absolute; left: 3%; top: 4%; pointer-events: none; }
+  #ecg { display: block; width: calc(var(--u) * 66); height: calc(var(--u) * 20); image-rendering: pixelated; image-rendering: crisp-edges;
+    background: #060b10; border: max(var(--u), 1px) solid #55636e; box-sizing: content-box; }
+  #hpLabel { position: absolute; left: calc(var(--u) * 72); top: 0; font-size: .82em; letter-spacing: .14em; white-space: nowrap; }
+  #sta { margin-top: calc(var(--u) * 2); width: calc(var(--u) * 66); height: max(calc(var(--u) * 2), 2px); background: rgba(10,16,24,.7);
+    border: max(var(--u), 1px) solid #3a4650; box-sizing: content-box; }
+  #sta i { display: block; height: 100%; background: #9fb4c4; }
+  #sta.low i { background: #d2564a; }
+  #death { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding-bottom: 16%; pointer-events: none;
+    color: #a2302c; font-size: 2.7em; letter-spacing: .3em; background: radial-gradient(rgba(50,0,0,.2), rgba(0,0,0,.82)); }
+  #card { opacity: 0; transition: opacity 1.4s ease-in-out; background: none; gap: .5em; }
+  #card.show { opacity: 1; }
+  #card b { font-size: 2.7em; letter-spacing: .34em; margin-right: -.34em; color: #e4ebf0; text-shadow: 0 0 calc(var(--u) * 6) rgba(160,190,210,.4); }
+  #card b::after { content: ''; display: block; width: 72%; height: max(var(--u), 1px); margin: .22em auto 0; background: linear-gradient(90deg, transparent, #8fa0ad, transparent); }
+  #card i { font-size: 1.15em; letter-spacing: .22em; color: #9fb0bd; }
+  .gbtn { border: 2px solid rgba(200,215,225,.36); background: rgba(20,28,38,.4); color: rgba(225,235,240,.85); border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; font-size: 15px; letter-spacing: 1px; }
+  #btnAtk { right: max(118px, calc(env(safe-area-inset-right) + 96px)); bottom: 28px; width: 74px; height: 74px; }
+  #btnDodge { right: max(30px, env(safe-area-inset-right)); bottom: 146px; width: 64px; height: 64px; font-size: 13px; }
+  #btnInv { right: max(64px, calc(env(safe-area-inset-right) + 54px)); top: max(8px, env(safe-area-inset-top)); width: 58px; height: 38px; border-radius: 0; }
+  body[data-state="title"] .gbtn, body[data-state="paused"] .gbtn, body[data-state="dead"] .gbtn,
+  body[data-state="dead"] #stick, body[data-state="dead"] #btnA, body[data-state="dead"] #btnMenu { display: none; }
+  #toast { top: 15%; }
 </style>
 </head>
 <body data-state="boot">
@@ -120,7 +145,7 @@
   <canvas id="view"></canvas>
   <div id="ui">
     <div id="title" class="hidden"><canvas id="logo" width="256" height="56"></canvas></div>
-    <div id="footer" class="hidden">PROLOGUE + CHAPTER 1</div>
+    <div id="footer" class="hidden">PROLOGUE - CHAPTER 2</div>
     <div id="menu" class="hidden"></div>
     <div id="marker" class="hidden"><i></i></div>
     <div id="hint" class="hidden"></div>
@@ -128,6 +153,8 @@
     <div class="bar top"></div><div class="bar bot"></div>
     <div id="bark" class="hidden"></div>
     <div id="card" class="hidden"><b></b><i></i></div>
+    <div id="hud" class="hidden"><canvas id="ecg" width="66" height="20"></canvas><div id="hpLabel"></div><div id="sta"><i></i></div></div>
+    <div id="death" class="hidden">YOU DIED</div>
     <div id="dialogue" class="hidden">
       <div class="dlg-name hidden"></div>
       <div class="dlg-body inner"><span class="dlg-shown"></span><span class="dlg-rest"></span></div>
@@ -141,6 +168,9 @@
   <div id="stick"><div id="knob"></div></div>
   <div id="btnA">ACT</div>
   <div id="btnMenu">II</div>
+  <div id="btnAtk" class="gbtn hidden">ATK</div>
+  <div id="btnDodge" class="gbtn">DODGE</div>
+  <div id="btnInv" class="gbtn">ITEM</div>
 </div>
 
 <script>
@@ -163,13 +193,14 @@
      5. PS1 MATERIAL            vertex snap, affine warp, vertex lighting, fog
      6. GEOMETRY BUILDERS       loft / box / quad + StaticBatch with baked vertex lighting
      7. CHARACTERS              Leta, Mnema, the Hollow (segmented low-poly rigs) + procedural animation and poses
-     8. SCENES                  registerScene(); 'city_entrance', 'main_street'
-     9. CHAPTERS                registerChapter(); 'prologue', 'chapter1'   <-- add Chapter 2 here
-    10. RENDERER + POST         240p target, dither, grain, VHS, scanlines
+     8. SCENES                  registerScene(); 'city_entrance', 'main_street', 'chapel_road'
+     9. CHAPTERS                registerChapter(); 'prologue', 'chapter1', 'chapter2' (placeholder)
+    10. RENDERER + POST         360p target, dither, film grain, vignette
     11. INPUT                   keyboard + mouse, gamepad, touch stick / drag-look
     12. DIALOGUE UI             typewriter text box, choices
     13. MENUS                   title, settings, pause
     14. GAME CORE               actors, third-person camera + collision, follower AI, triggers, scripts
+    14b. COMBAT, MONSTERS, ITEMS, HUD
     15. BOOT
    ===================================================================================================== */
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
@@ -177,8 +208,8 @@ THREE.ColorManagement.enabled = false;          // colours are authored display-
 
 /* ============================== 1. CONFIG / UTILS ============================== */
 const CFG = {
-  lowH: 240, aspectMin: 4 / 3, aspectMax: 16 / 9,
-  walkSpeed: 1.55, runSpeed: 3.5, playerRadius: 0.28,
+  lowH: 360, uiH: 240, aspectMin: 4 / 3, aspectMax: 16 / 9,
+  walkSpeed: 1.55, runSpeed: 3.5, playerRadius: 0.28, maxHp: 100, maxSta: 100,
   camDist: 2.6, camHeight: 1.42, camShoulder: .4, camFov: 55,      // over-the-shoulder follow camera
   saveKey: 'asphodel.save.v1', settingsKey: 'asphodel.settings.v1',
 };
@@ -221,7 +252,7 @@ const SaveSystem = {
   /** Snapshot of everything a chapter needs to resume: where, facing, flags, playtime. */
   write(G) {
     const d = { version: 1, chapter: G.chapter, scene: G.sceneId, x: G.player.x, z: G.player.z, heading: G.player.heading,
-      flags: { ...G.flags }, playtime: Math.round(G.playtime), savedAt: Date.now() };
+      flags: { ...G.flags }, hp: Math.round(G.hp), inv: { ...G.inv }, playtime: Math.round(G.playtime), savedAt: Date.now() };
     try { localStorage.setItem(CFG.saveKey, JSON.stringify(d)); return true; } catch (e) { return false; }
   },
   clear() { try { localStorage.removeItem(CFG.saveKey); } catch (e) { /* storage unavailable */ } },
@@ -229,7 +260,7 @@ const SaveSystem = {
 
 /* ============================== 3. AUDIO ============================== */
 const Sound = {
-  ctx: null, master: null, nextNote: 2.5, windMul: 1,
+  ctx: null, master: null, nextNote: 2.5, windMul: 1, ambWind: 1, ambSecs: 4, amb: { wind: 1, drone: 1, pitch: 1 },
   /** Browsers only allow audio after a user gesture; called from every input handler. */
   unlock() {
     if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
@@ -245,7 +276,9 @@ const Sound = {
     this.windGain = ctx.createGain(); this.windGain.gain.value = .1;
     src.connect(this.windFilter).connect(this.windGain).connect(this.master); src.start();
     // low drone
-    for (const f of [55, 55.6, 82.3]) { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; g.gain.value = .03; o.connect(g).connect(this.master); o.start(); }
+    this.droneGain = ctx.createGain(); this.droneGain.connect(this.master);
+    this.drones = [55, 55.6, 82.3].map(f => { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; g.gain.value = .03; o.connect(g).connect(this.droneGain); o.start(); return o; });
+    this.ambience(this.amb, .1);
     // echo bus for the sparse notes
     const delay = ctx.createDelay(1), fb = ctx.createGain(), tone = ctx.createBiquadFilter();
     delay.delayTime.value = .43; fb.gain.value = .42; tone.type = 'lowpass'; tone.frequency.value = 1300;
@@ -280,6 +313,29 @@ const Sound = {
   sob(vol = 1) { const f = 520 + Math.random() * 80; [0, .16, .3].forEach((t, i) => setTimeout(() => this.tone(f * (1 - i * .09), .13, 'sine', .024 * vol, this.echo, .03), t * 1000)); },
   /** Low dissonant swell for monsters. */
   dread(secs = 6) { for (const f of [46.2, 49, 69.3]) this.tone(f, secs, 'sawtooth', .03, null, secs * .4); },
+  /** Crossfade the ambient bed to a scene's profile { wind, drone, pitch } over `secs`. */
+  ambience(p, secs = 4) {
+    this.amb = { wind: 1, drone: 1, pitch: 1, ...p }; this.ambSecs = secs;
+    if (!this.ctx) return; const t = this.ctx.currentTime;
+    this.droneGain.gain.setTargetAtTime(this.amb.drone, t, secs / 3);
+    this.drones.forEach((o, i) => o.frequency.setTargetAtTime([55, 55.6, 82.3][i] * this.amb.pitch, t, secs / 3));
+  },
+  /** Filtered noise burst: the base of the combat placeholder sounds below. */
+  thud(freq, dur, vol, q = 1) {
+    const ctx = this.ctx; if (!ctx) return;
+    const s = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain(), t = ctx.currentTime;
+    s.buffer = this.noise; f.type = 'bandpass'; f.Q.value = q; f.frequency.value = freq;
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+    s.connect(f).connect(g).connect(this.master); s.start(t, Math.random(), dur + .02);
+  },
+  swing(heavy) { this.thud(heavy ? 480 : 900, heavy ? .24 : .14, .09, .8); },
+  hit(heavy) { this.tone(heavy ? 70 : 95, .2, 'sine', .3); this.thud(1400, .08, .16, .7); },
+  hurt() { this.tone(180, .25, 'sawtooth', .07); this.thud(300, .16, .14); },
+  growl(kind) { const f = kind === 'brute' ? 48 : kind === 'die' ? 60 : 85; this.tone(f, .7, 'sawtooth', .06, null, .08); this.tone(f * 1.07, .7, 'sawtooth', .05, null, .1); },
+  scream() { for (const f of [1250, 1320, 1870]) this.tone(f, .9, 'sawtooth', .035, this.echo, .03); this.thud(2600, .8, .08, 2); },
+  heal() { [523, 659, 784].forEach((f, i) => setTimeout(() => this.tone(f, .3, 'sine', .05, this.echo), i * 90)); },
+  pickup() { this.tone(880, .08, 'triangle', .06); setTimeout(() => this.tone(1175, .12, 'triangle', .05), 70); },
+  death() { this.tone(110, 2.5, 'sawtooth', .05, this.echo, .05); this.tone(55, 3, 'sine', .2, null, .3); },
   note() {
     const scale = [220, 261.63, 293.66, 329.63, 392, 440, 523.25, 164.81];
     const f = scale[Math.floor(Math.random() * scale.length)];
@@ -288,7 +344,8 @@ const Sound = {
   update(dt, t) {
     const ctx = this.ctx; if (!ctx || ctx.state !== 'running') return;
     const now = ctx.currentTime;
-    this.windGain.gain.setTargetAtTime((.05 + .09 * (.5 + .5 * Math.sin(t * .23)) * (.6 + .4 * Math.sin(t * .71 + 2))) * this.windMul, now, .5);
+    this.windGain.gain.setTargetAtTime((.05 + .09 * (.5 + .5 * Math.sin(t * .23)) * (.6 + .4 * Math.sin(t * .71 + 2))) * this.windMul * this.ambWind, now, .5);
+    this.ambWind += (this.amb.wind - this.ambWind) * Math.min(1, dt * 3 / this.ambSecs);
     this.windFilter.frequency.setTargetAtTime(330 + 260 * (.5 + .5 * Math.sin(t * .13)), now, .8);
     this.nextNote -= dt;
     if (this.nextNote <= 0) { this.note(); this.nextNote = 5 + Math.random() * 9; }
@@ -703,6 +760,71 @@ function buildChapter1Textures() {
   sign('sign_cafe', 'CAFE', [62, 46, 40], [196, 184, 150], 12);
 }
 
+/** Textures for the systems update: damaged set dressing, monsters, items. */
+function buildUpdateTextures() {
+  const R = mulberry32(909), RUST = [120, 72, 44];
+  defTex('facade_k', (x, y) => {                                           // plaster with a smashed window
+    let c = noisy(mix3([86, 92, 100], [108, 110, 112], vnoiseP(x / 8, y / 8, 8)), 9, R);
+    if (vnoiseP(x / 16, y / 16, 4) > .66) c = sh(c, .82);                  // damp patches
+    if (x >= 16 && x < 48 && y >= 12 && y < 46) {
+      const edge = x < 18 || x >= 46 || y < 14 || y >= 44 || x === 31 || x === 32;
+      const hole = Math.hypot(x - 36, (y - 30) * 1.1) < 8 + 5 * vnoiseP(x / 3.2, y / 3.2, 20);
+      c = edge ? [58, 62, 68] : hole ? [8, 10, 14] : ((x - y + 64) % 9 === 0 ? [70, 80, 90] : noisy([30, 38, 48], 5, R));
+    } else if (y >= 46 && y < 49 && x >= 14 && x < 50) c = [118, 122, 124];
+    else if (y >= 49 && hash2(x, 3) > .8) c = sh(c, .8);
+    return c;
+  });
+  defTex('shop_k', (x, y) => {                                             // shopfront with the display window broken in
+    if (y < 9) return noisy([52, 46, 44], 6, R);
+    if (y >= 52) return noisy(sh([100, 102, 104], 1 - (y - 52) * .02), 8, R);
+    if (x >= 44) return (x === 44 || x === 63 || y === 9) ? [40, 42, 46] : noisy(mix3([84, 70, 58], [64, 54, 48], vnoiseP(x / 4, y / 16, 16, 4)), 6, R);
+    if (x < 2 || x >= 42 || y < 11 || y >= 50) return [52, 56, 60];
+    const hole = Math.hypot(x - 20, (y - 34) * .8) < 11 + 7 * vnoiseP(x / 4, y / 4, 16);
+    return hole ? noisy([9, 11, 15], 3, R) : ((x + y) % 11 === 0 ? [64, 74, 84] : noisy([26, 32, 40], 5, R));
+  });
+  defTex('flesh', (x, y) => Math.abs(vnoiseP(x / 6.4, y / 6.4, 10) - .5) < .025 ? noisy([40, 26, 34], 6, R) : noisy(mix3([96, 72, 74], [58, 50, 58], vnoiseP(x / 16, y / 16, 4)), 8, R));
+  defTex('scream_face', (x, y) => {                                        // a mouth that takes up most of the face
+    const m = Math.hypot((x - 32) / 9, (y - 44) / 13), e = Math.min(Math.hypot(x - 21, y - 25), Math.hypot(x - 43, y - 25));
+    if (m < 1) return noisy([8, 6, 8], 3, R);
+    if (m < 1.25) return noisy([70, 50, 54], 6, R);
+    return sh(noisy(mix3([132, 132, 130], [162, 160, 154], vnoiseP(x / 16, y / 16, 4)), 7, R), .55 + .45 * clamp(e / 5, 0, 1));
+  });
+  defTex('bandage', (x, y) => noisy(sh([206, 200, 186], (x + y) % 4 === 0 ? .86 : 1), 6, R));
+  defTex('medkit', (x, y) => {
+    if (x < 2 || x > 61 || y < 2 || y > 61) return [58, 62, 64];
+    const cross = (Math.abs(x - 32) < 5 && Math.abs(y - 32) < 15) || (Math.abs(y - 32) < 5 && Math.abs(x - 32) < 15);
+    return cross ? noisy([150, 44, 42], 8, R) : noisy([186, 190, 186], 7, R);
+  });
+  defTex('paleflower', () => [0, 0, 0, 0], ctx => {
+    for (let k = 0; k < 9; k++) {
+      const x = 8 + R() * 48, top = 8 + R() * 24;
+      pline(ctx, 32 + (x - 32) * .3, 63, x, top, [96, 110, 104]); dot(ctx, x - 2, top - 1, [208, 220, 236], 5, 3); dot(ctx, x - 1, top - 2, [232, 238, 246], 3, 5);
+    }
+  });
+  // torn posters: paper with ragged alpha edges
+  const poster = (name, paper, draw) => defTex(name, (x, y) => {
+    const edge = Math.min(x, 63 - x, y, 63 - y) - 9 * vnoiseP(x / 5.33, y / 5.33, 12), tear = vnoiseP(x / 8, y / 8, 8) > .8 && y > 38;
+    const c = noisy(sh(paper, .86 + .2 * vnoiseP(x / 16, y / 16, 4)), 8, R);
+    return [c[0], c[1], c[2], edge > -3 && !tear ? 255 : 0];
+  }, ctx => {
+    ctx.globalCompositeOperation = 'source-atop'; draw(ctx); ctx.globalCompositeOperation = 'source-over';
+  });
+  poster('poster', [172, 166, 146], ctx => {
+    dot(ctx, 6, 8, [120, 44, 40], 52, 11); drawText(ctx, 'NOTICE', 14, 10, { color: [206, 200, 180] });
+    for (let r = 0; r < 6; r++) for (let x = 9; x < 54; x += 2) if (hash2(x, r + 40) > .3) dot(ctx, x, 25 + r * 5, [70, 66, 60], 1, 2);
+  });
+  poster('poster2', [70, 84, 100], ctx => {
+    drawText(ctx, 'FAIR', 9, 9, { sx: 2, sy: 2, pitch: 12, color: [206, 190, 120] }); dot(ctx, 6, 27, [206, 190, 120], 52, 2);
+    drawText(ctx, 'OCT 4', 17, 34, { color: [190, 196, 200] }); drawText(ctx, 'PLAZA', 17, 45, { color: [190, 196, 200] });
+  });
+  defTex('puddle', (x, y) => {
+    const n = vnoiseP(x / 8, y / 8, 8), a = clamp((.74 - Math.hypot((x - 31.5) / 30, (y - 31.5) / 26) - .3 * n) * 7, 0, .8);
+    const c = mix3([52, 60, 70], [170, 180, 190], clamp(vnoiseP(x / 21.3, y / 10.67, 3, 6) * 1.5 - .3, 0, 1));
+    return [c[0], c[1], c[2], a * 255];
+  });
+  defTex('wallshadow', (x, y) => [0, 0, 0, 150 * Math.pow(1 - y / 63, 1.6)]);   // darkest where the ground meets the wall
+}
+
 /* ============================== 5. PS1 MATERIAL ============================== */
 /* One shader for everything: clip-space vertex snapping (jitter), partially affine UVs (texture
    warp), per-vertex lighting and distance fog. Static geometry reads lighting baked into vertex
@@ -712,10 +834,11 @@ const SHARED = {
   uFogColor: { value: new THREE.Vector3(.44, .49, .54) }, uFogNear: { value: 4 }, uFogFar: { value: 46 }, uFogMax: { value: .96 },
   uAmbient: { value: new THREE.Vector3(.6, .6, .6) }, uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Vector3() },
   uLampPos: { value: new THREE.Vector3() }, uLampCol: { value: new THREE.Vector3() }, uLampR: { value: 1 }, uFlicker: { value: 1 },
+  uFlashPos: { value: new THREE.Vector3() }, uFlashDir: { value: new THREE.Vector3(0, 0, 1) }, uFlashCol: { value: new THREE.Vector3() },   // Leta's flashlight
 };
 const PS1_VS = `
 uniform vec2 uSnap; uniform float uAffine;
-varying vec3 vUvw; varying vec3 vLight; varying vec3 vLampL; varying float vDist;
+varying vec3 vUvw; varying vec3 vLight; varying vec3 vLampL; varying float vDist; varying vec3 vWorld; varying vec3 vNrm;
 #ifdef BAKED
 attribute vec3 aColor; attribute vec3 aLamp;
 #else
@@ -730,6 +853,7 @@ void main() {
   float W = mix(1.0, max(clip.w, 0.05), uAffine);                        // W=1: perspective-correct, W=w: fully affine
   vUvw = vec3(uv * W, W);
   vDist = length(mv.xyz);
+  vWorld = wp.xyz; vNrm = mat3(modelMatrix) * normal;
 #ifdef BAKED
   vLight = aColor; vLampL = aLamp;
 #else
@@ -742,11 +866,15 @@ void main() {
 const PS1_FS = `
 uniform sampler2D map; uniform vec3 uFogColor; uniform float uFogNear; uniform float uFogFar; uniform float uFogMax;
 uniform float uFogAmt; uniform float uFlicker; uniform float uAlphaTest; uniform float uOpacity;
-varying vec3 vUvw; varying vec3 vLight; varying vec3 vLampL; varying float vDist;
+uniform vec3 uFlashPos; uniform vec3 uFlashDir; uniform vec3 uFlashCol;
+varying vec3 vUvw; varying vec3 vLight; varying vec3 vLampL; varying float vDist; varying vec3 vWorld; varying vec3 vNrm;
 void main() {
   vec4 t = texture2D(map, vUvw.xy / vUvw.z);
   if (t.a < uAlphaTest) discard;
-  vec3 c = t.rgb * (vLight + vLampL * uFlicker);
+  vec3 fd = vWorld - uFlashPos; float fl = length(fd); fd /= max(fl, 0.001);            // flashlight: a per-pixel spot cone
+  float fa = max(0.0, 1.0 - fl / 16.0);
+  vec3 flash = uFlashCol * smoothstep(0.80, 0.95, dot(fd, uFlashDir)) * fa * fa * (0.35 + 0.65 * abs(dot(normalize(vNrm), fd)));
+  vec3 c = t.rgb * (vLight + vLampL * uFlicker + flash);
   float f = clamp((vDist - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0) * uFogMax * uFogAmt;
 #ifdef ADDITIVE
   c *= (1.0 - f);
@@ -757,6 +885,9 @@ void main() {
 }`;
 /* Per-material flags, keyed by material name (defaults to an opaque material using TEX[name]). */
 const MAT_PRESETS = {
+  beam: { tex: 'wisp', transparent: true, additive: true, double: true, opacity: .07 }, spark: { tex: 'wisp', transparent: true, additive: true, double: true, opacity: .85, fog: 0 },
+  puddle: { transparent: true, decal: true }, wallshadow: { transparent: true, decal: true, double: true }, paleflower: { alphaTest: .5, double: true },
+  poster: { alphaTest: .5, decal: true, double: true }, poster2: { alphaTest: .5, decal: true, double: true },
   glass: { transparent: true }, clock: { alphaTest: .5 }, rag: { alphaTest: .5, double: true }, flowers: { alphaTest: .5, double: true },
   twigs: { alphaTest: .5, double: true }, weeds: { alphaTest: .5, double: true }, limit: { alphaTest: .5, double: true },
   paintline: { alphaTest: .5, decal: true }, manhole: { alphaTest: .5, decal: true }, paper: { decal: true },
@@ -881,7 +1012,7 @@ function toGeometry(data) {
 }
 
 /* Materials that never block the camera (sky, decals, foliage, light cones). */
-const NO_CAM = new Set(['sky', 'twigs', 'weeds', 'flowers', 'cone', 'mist', 'shadow', 'stain', 'paper', 'paintline', 'manhole', 'glow']);
+const NO_CAM = new Set(['sky', 'twigs', 'weeds', 'flowers', 'cone', 'mist', 'shadow', 'stain', 'paper', 'paintline', 'manhole', 'glow', 'puddle', 'wallshadow', 'poster', 'poster2']);
 /** Collects static geometry per material and bakes the scene lighting into vertex colours. */
 class StaticBatch {
   constructor() { this.b = {}; this.tris = 0; this.col = []; }
@@ -907,7 +1038,7 @@ class StaticBatch {
   }
   box(key, w, h, d, m, o = {}) { this.add(key, boxData(w, h, d, o), m, o); }
   build(env) {
-    const group = new THREE.Group(), sun = new THREE.Vector3(...env.sunDir).normalize();
+    const group = new THREE.Group(), sun = new THREE.Vector3(...env.sunDir).normalize(), lamps = envLamps(env);
     for (const key in this.b) {
       const b = this.b[key], n = b.pos.length / 3, col = new Float32Array(n * 3), lamp = new Float32Array(n * 3);
       for (let i = 0; i < n; i++) {
@@ -916,15 +1047,18 @@ class StaticBatch {
         if (b.mode[i] === 2) { lamp[k] = tr; lamp[k + 1] = tg; lamp[k + 2] = tb; continue; }
         const hemi = .72 + .28 * ny, s = Math.max(0, nx * sun.x + ny * sun.y + nz * sun.z);
         col[k] = tr * (env.ambient[0] * hemi + env.sunCol[0] * s); col[k + 1] = tg * (env.ambient[1] * hemi + env.sunCol[1] * s); col[k + 2] = tb * (env.ambient[2] * hemi + env.sunCol[2] * s);
-        const lx = env.lampPos[0] - b.pos[k], ly = env.lampPos[1] - b.pos[k + 1], lz = env.lampPos[2] - b.pos[k + 2], dist = Math.hypot(lx, ly, lz) || 1;
-        const att = Math.max(0, 1 - dist / env.lampR), w = att * att * (.3 + .7 * Math.max(0, (nx * lx + ny * ly + nz * lz) / dist));
-        lamp[k] = tr * env.lampCol[0] * w; lamp[k + 1] = tg * env.lampCol[1] * w; lamp[k + 2] = tb * env.lampCol[2] * w;
+        for (const L of lamps) {                                             // steady lamps go into the base colour, flickering ones into their own channel
+          const lx = L.pos[0] - b.pos[k], ly = L.pos[1] - b.pos[k + 1], lz = L.pos[2] - b.pos[k + 2], dist = Math.hypot(lx, ly, lz) || 1;
+          const att = Math.max(0, 1 - dist / L.r), w = att * att * (.3 + .7 * Math.max(0, (nx * lx + ny * ly + nz * lz) / dist)), out = L.steady ? col : lamp;
+          out[k] += tr * L.col[0] * w; out[k + 1] += tg * L.col[1] * w; out[k + 2] += tb * L.col[2] * w;
+        }
       }
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
       g.setAttribute('uv', new THREE.Float32BufferAttribute(b.uv, 2));
       g.setAttribute('aColor', new THREE.BufferAttribute(col, 3));
       g.setAttribute('aLamp', new THREE.BufferAttribute(lamp, 3));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(b.nrm, 3));      // for the flashlight
       const mesh = new THREE.Mesh(g, ps1Mat(key, true)); mesh.frustumCulled = false;
       if (key === 'sky') mesh.renderOrder = -10;
       group.add(mesh);
@@ -935,66 +1069,107 @@ class StaticBatch {
 }
 
 /* ============================== 7. CHARACTERS ============================== */
-/* Characters are built in code from lofted primitives as rigid segments in a joint hierarchy
-   (the way PS1 Resident Evil models were), ~500-650 triangles each. Local +Z is "forward". */
+/* Characters are built in code from lofted primitives bound rigidly to a bone hierarchy, the way
+   PS1 Resident Evil models were: body > torso > head, arm > elbow > hand, leg > knee (> foot).
+   Leta and Mnema are about 2,000 triangles each; monsters are deliberately cruder.
+   Animation = procedural locomotion (idle / walk / run) + keyframed action clips (attack, dodge,
+   hurt, death ...) + emote poses, all blended per bone. Local +Z is "forward". */
 const HEAD_RINGS = [
+  { y: -.122, rx: .012, rz: .014, z: .03 }, { y: -.108, rx: .04, rz: .042, z: .022 }, { y: -.085, rx: .062, rz: .064, z: .012 },
+  { y: -.055, rx: .079, rz: .082, z: .005 }, { y: -.02, rx: .09, rz: .094 }, { y: .02, rx: .096, rz: .1 }, { y: .06, rx: .095, rz: .1, z: -.002 },
+  { y: .095, rx: .084, rz: .09, z: -.004 }, { y: .12, rx: .058, rz: .064, z: -.006 }, { y: .132, rx: .012, rz: .012, z: -.006 },
+];
+const HEAD_CRUDE = [
   { y: -.12, rx: .014, rz: .014, z: .012 }, { y: -.095, rx: .05, rz: .054, z: .008 }, { y: -.045, rx: .083, rz: .086 },
   { y: .02, rx: .096, rz: .1 }, { y: .08, rx: .09, rz: .098, z: -.004 }, { y: .118, rx: .06, rz: .066, z: -.006 }, { y: .13, rx: .012, rz: .012, z: -.006 },
 ];
+const TORSO = [   // waist, chest, shoulders, neck base
+  { y: 0, rx: .098, rz: .078, v: 0 }, { y: .08, rx: .09, rz: .073, v: .2 }, { y: .2, rx: .117, rz: .097, z: .008, v: .5 }, { y: .29, rx: .131, rz: .09, v: .72 },
+  { y: .355, rx: .137, rz: .08, v: .88 }, { y: .395, rx: .07, rz: .055, v: .97 }, { y: .41, rx: .04, rz: .04, v: 1 },
+];
+const TORSO_CRUDE = [{ y: 0, rx: .1, rz: .078, v: 0 }, { y: .2, rx: .125, rz: .095, v: .5 }, { y: .35, rx: .14, rz: .085, v: .87 }, { y: .4, rx: .045, rz: .045, v: 1 }];
+const THIGH = [{ y: .04, r: .064 }, { y: -.05, rx: .072, rz: .074 }, { y: -.2, r: .063 }, { y: -.32, r: .05 }, { y: -.385, r: .046 }];
+const SHIN = [{ y: .012, r: .046, v: 1 }, { y: -.05, r: .048, v: .85 }, { y: -.15, rx: .049, rz: .053, z: -.007, v: .6 }, { y: -.28, r: .038, v: .28 }, { y: -.39, r: .033, v: 0 }];
+const FOOT = [{ y: -.075, rx: .044, rz: .04, z: .007 }, { y: -.02, rx: .058, rz: .05 }, { y: .09, rx: .062, rz: .046, z: .003 }, { y: .168, rx: .046, rz: .028, z: .015 }];
+/** Thicken or thin a ring profile. */
+const fat = (rings, g) => g === 1 ? rings : rings.map(r => ({ ...r, r: undefined, rx: (r.rx ?? r.r) * g, rz: (r.rz ?? r.rx ?? r.r) * g }));
+
 function buildHumanoid(def) {
   let tris = 0;
+  const hi = def.detail !== 'crude', LS = hi ? 10 : 6, TS = hi ? 14 : 8, girth = def.girth || 1, limb = def.limb || 1;
   const part = (parent, data, tex) => { const m = new THREE.Mesh(toGeometry(data), ps1Mat(tex)); tris += data.pos.length / 9; parent.add(m); return m; };
   const grp = (parent, x, y, z) => { const g = new THREE.Group(); g.position.set(x, y, z); parent.add(g); return g; };
-  const T = def.tex, root = new THREE.Group(), j = {};
+  const T = def.tex, root = new THREE.Group(), j = {}; root.rotation.order = 'YXZ';   // heading first, then the death fall
   j.body = grp(root, 0, .84, 0);
-  part(j.body, loftData([{ y: -.075, rx: .1, rz: .085 }, { y: .1, rx: .1, rz: .078 }], 8, { capStart: true }), T.pelvis);
+  part(j.body, loftData(fat(hi ? [{ y: -.075, rx: .1, rz: .085 }, { y: .02, rx: .104, rz: .086 }, { y: .1, rx: .098, rz: .078 }] : [{ y: -.075, rx: .1, rz: .085 }, { y: .1, rx: .1, rz: .078 }], girth), TS, { capStart: true }), T.pelvis);
   j.torso = grp(j.body, 0, .1, 0);
-  part(j.torso, loftData([{ y: 0, rx: .1, rz: .078, v: 0 }, { y: .2, rx: .125, rz: .095, v: .5 }, { y: .35, rx: .14, rz: .085, v: .87 }, { y: .4, rx: .045, rz: .045, v: 1 }], 8), T.torso);
-  part(j.torso, loftData([{ y: .38, r: .037 }, { y: .47, r: .034 }], 6), T.skin);
-  j.head = grp(j.torso, 0, .565, 0); j.head.scale.setScalar(def.headScale || 1.15);
-  part(j.head, loftData(HEAD_RINGS, 8, { smooth: true, smoothY: .3, planar: { x0: -.1, w: .2, y0: -.12, h: .25 } }), T.face);
+  part(j.torso, loftData(fat(hi ? TORSO : TORSO_CRUDE, girth), TS), T.torso);
+  part(j.torso, loftData([{ y: .385, r: .039 }, { y: .43, r: .033 }, { y: .475, r: .034 }], hi ? 8 : 6), T.skin);
+  j.head = grp(j.torso, 0, .565, 0); j.head.scale.setScalar(def.headScale || 1.12);
+  part(j.head, loftData(hi ? HEAD_RINGS : HEAD_CRUDE, TS, { smooth: true, smoothY: .3, planar: { x0: -.1, w: .2, y0: -.12, h: .25 } }), T.face);
+  if (hi) part(j.head, loftData([{ y: -.058, rx: .012, rz: .012, z: .097 }, { y: -.022, rx: .005, rz: .004, z: .097 }], 4, { capStart: true }), T.skin);   // nose
   for (const s of [1, -1]) {
     const k = s > 0 ? 'L' : 'R';
     // arm: shoulder -> elbow -> hand
-    const arm = j['arm' + k] = grp(j.torso, s * .158, .345, 0); arm.rotation.z = s * def.armRest; arm.userData.restZ = s * def.armRest;
-    part(arm, loftData(def.upperArm, 6), T.upperArm);
+    const arm = j['arm' + k] = grp(j.torso, s * .158 * girth, .345, 0); arm.rotation.z = s * def.armRest; arm.userData.restZ = s * def.armRest;
+    part(arm, loftData(fat(def.upperArm, limb), LS), T.upperArm);
     const el = j['elbow' + k] = grp(arm, 0, -.24, 0);
-    part(el, loftData(def.foreArm, 6), T.foreArm);
-    part(grp(el, 0, -.22, 0), loftData([{ y: .012, rx: .024, rz: .03 }, { y: -.04, rx: .024, rz: .044 }, { y: -.088, rx: .016, rz: .03 }], 4, { halfStep: true, capEnd: true }), T.skin);
+    part(el, loftData(fat(def.foreArm, limb), LS), T.foreArm);
+    const hand = j['hand' + k] = grp(el, 0, -.22, 0), palm = [{ y: .012, rx: .022, rz: .028 }, { y: -.035, rx: .023, rz: .042 }, { y: -.07, rx: .02, rz: .038 }, { y: -.1, rx: .012, rz: .024 }];
+    part(hand, loftData(fat(palm, limb), hi ? 8 : 4, { halfStep: !hi, capEnd: true }), T.skin);
+    if (hi) part(hand, loftData([{ y: -.01, r: .012, z: .034 }, { y: -.052, r: .009, z: .052 }], 4, { capEnd: true }), T.skin);   // thumb
     // leg: hip -> knee -> foot
-    const leg = j['leg' + k] = grp(j.body, s * .068, -.02, 0);
-    part(leg, loftData([{ y: .03, r: .07 }, { y: -.2, r: .06 }, { y: -.38, r: .047 }], 6), T.skin);
+    const leg = j['leg' + k] = grp(j.body, s * .068 * (1 + (girth - 1) * .6), -.02, 0);
+    part(leg, loftData(fat(hi ? THIGH : [{ y: .03, r: .07 }, { y: -.2, r: .06 }, { y: -.38, r: .047 }], limb), LS), T.skin);
     const kn = j['knee' + k] = grp(leg, 0, -.38, 0);
-    part(kn, loftData([{ y: .012, r: .047, v: 1 }, { y: -.13, r: .05, v: .66 }, { y: -.39, r: .034, v: 0 }], 6), T.leg);
-    const foot = [{ y: -.075, rx: .044, rz: .04, z: .007 }, { y: -.02, rx: .058, rz: .05 }, { y: .09, rx: .062, rz: .046, z: .003 }, { y: .168, rx: .046, rz: .028, z: .015 }];
-    part(grp(kn, 0, -.39, 0), xform(loftData(foot, 4, { halfStep: true, capStart: true, capEnd: true }), new THREE.Matrix4().makeRotationX(Math.PI / 2).setPosition(0, -.015, 0)), T.shoe);
+    part(kn, loftData(fat(hi ? SHIN : [{ y: .012, r: .047, v: 1 }, { y: -.13, r: .05, v: .66 }, { y: -.39, r: .034, v: 0 }], limb), LS), T.leg);
+    part(grp(kn, 0, -.39, 0), xform(loftData(fat(FOOT, limb), hi ? 8 : 4, { halfStep: !hi, capStart: true, capEnd: true }), new THREE.Matrix4().makeRotationX(Math.PI / 2).setPosition(0, -.015, 0)), T.shoe);
   }
   def.extras({ j, part, grp });
   root.scale.setScalar(def.scale || 1);
   return { name: def.name, root, joints: j, style: def.style, tris, baseY: .84,
-    anim: { speed: 0, blend: 0, phase: 0, look: null, lookYaw: 0, emote: null, emoteT: 0, onStep: null } };
+    anim: { speed: 0, blend: 0, phase: 0, look: null, lookYaw: 0, pose: null, clip: null, clipT: 0, onStep: null } };
 }
-/** Hair shared by both girls: a cap, front bangs and a side/back curtain (alpha-cut tips). */
+/** One lock of hair: a flat, tapering strip hanging from the head at angle `ang` (0 = front). */
+function hairLock(ang, y0, len, w, o = {}) {
+  const n = o.n || 3, rings = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    rings.push({ y: y0 - len * t, z: (o.r ?? .104) + (o.out ?? .012) * Math.sin(t * Math.PI) + (o.curl || 0) * t * t, rx: w * (1 - .7 * t * t), rz: .016 * (1 - .6 * t), v: 1 - t });
+  }
+  return xform(loftData(rings, 4, { uv: [o.u || 0, 0, (o.u || 0) + .25, 1] }), M(0, 0, 0, ang));
+}
+/** Layered hair: a cap, an under-layer around the sides and back, then separate locks for the fringe and the sides. */
 function addHair(k, tex, o) {
-  const A = Math.PI / 180;
-  k.part(k.j.head, loftData([{ y: .147, r: .012 }, { y: .128, rx: .069, rz: .075, z: -.004 }, { y: .075, rx: .104, rz: .11, z: -.002 }], 8, { uv: [0, .58, 1, 1] }), tex);
-  k.part(k.j.head, loftData([{ y: .09, rx: .102, rz: .113, v: 1 }, { y: o.bangs, rx: .1, rz: .112, v: 0 }], 4, { a0: -64 * A, a1: 64 * A, uv: o.bangUv }), tex);
-  k.part(k.j.head, loftData(o.curtain, 6, { a0: o.arc * A, a1: (360 - o.arc) * A }), tex);
+  const A = Math.PI / 180, d = { pos: [], uv: [], nrm: [] };
+  appendData(d, loftData([{ y: .148, r: .012 }, { y: .134, rx: .06, rz: .066, z: -.004 }, { y: .105, rx: .092, rz: .098, z: -.003 }, { y: .07, rx: .105, rz: .111, z: -.002 }], 12, { uv: [0, .55, 1, 1] }));
+  appendData(d, loftData(o.under, 10, { a0: o.arc * A, a1: (360 - o.arc) * A }));
+  for (const [ang, len, w] of o.fringe) appendData(d, hairLock(ang * A, .1, len, w, { u: .1 + (ang + 60) / 400 }));
+  for (const [ang, len, w, curl, n] of o.locks) appendData(d, hairLock(ang * A, .092, len, w, { out: .016, curl, n, u: (ang % 97) / 130 }));
+  k.part(k.j.head, d, tex);
 }
 function buildLeta() {
   return buildHumanoid({
     name: 'Leta', scale: 1,
     tex: { skin: 'skin', face: 'leta_face', leg: 'leg', shoe: 'shoe', pelvis: 'leta_skirt', torso: 'leta_blouse', upperArm: 'leta_cloth', foreArm: 'leta_cloth' },
-    upperArm: [{ y: .02, r: .047 }, { y: -.25, r: .042 }],
-    foreArm: [{ y: 0, r: .042 }, { y: -.15, r: .047 }, { y: -.205, r: .03 }, { y: -.225, r: .028 }],
+    upperArm: [{ y: .03, r: .03 }, { y: 0, r: .05 }, { y: -.12, r: .046 }, { y: -.25, r: .042 }],
+    foreArm: [{ y: 0, r: .042 }, { y: -.1, r: .046 }, { y: -.17, r: .048 }, { y: -.205, r: .03 }, { y: -.225, r: .028 }],
     armRest: .07,
     // stiff: arms barely swing, no sway, no bounce
     style: { legSwing: .5, kneeBend: .75, armSwing: .13, elbow: .03, bounce: .01, twist: .025, lean: .1, idleSway: 0, breath: .004, headTurn: .5, hairSway: 0 },
     extras(k) {
-      k.part(k.j.body, loftData([{ y: .105, rx: .104, rz: .082, v: 1 }, { y: -.07, rx: .185, rz: .165, v: .5 }, { y: -.235, rx: .228, rz: .208, v: 0 }], 10), 'leta_skirt');
-      k.part(k.j.torso, loftData([{ y: .425, rx: .046, rz: .046 }, { y: .392, rx: .072, rz: .066 }], 6, { uv: [0, .93, 1, 1] }), 'leta_blouse');   // collar
-      addHair(k, 'leta_hair', { bangs: .018, bangUv: [.1, 0, .6, 1], arc: 54,
-        curtain: [{ y: .085, rx: .106, rz: .112, v: 1 }, { y: -.035, rx: .111, rz: .114, v: .42 }, { y: -.11, rx: .1, rz: .098, v: 0 }] });
+      k.part(k.j.body, loftData([{ y: .105, rx: .104, rz: .082, v: 1 }, { y: .02, rx: .15, rz: .13, v: .76 }, { y: -.07, rx: .185, rz: .165, v: .5 }, { y: -.235, rx: .228, rz: .208, v: 0 }], 16), 'leta_skirt');
+      k.part(k.j.torso, loftData([{ y: .43, rx: .046, rz: .046 }, { y: .41, rx: .06, rz: .056 }, { y: .392, rx: .074, rz: .068 }], 10, { uv: [0, .93, 1, 1] }), 'leta_blouse');   // collar
+      addHair(k, 'leta_hair', { arc: 54,
+        under: [{ y: .085, rx: .106, rz: .112, v: 1 }, { y: -.035, rx: .111, rz: .114, v: .42 }, { y: -.11, rx: .1, rz: .098, v: 0 }],
+        fringe: [[-50, .1, .03], [-30, .082, .034], [-12, .078, .034], [2, .125, .03], [18, .08, .034], [36, .084, .032], [52, .1, .03]],
+        locks: [68, 96, 124, 152, 180, 208, 236, 264, 292].map((a, i) => [a, .19 + (i % 3) * .014, .042, -.02]) });
+      // a pocket light on her chest, its beam, and the plank (hidden until she picks it up)
+      k.part(k.j.torso, xform(boxData(.04, .07, .03, { faces: ['px', 'nx', 'py', 'ny', 'pz'] }), M(.07, .24, .095)), 'glow');
+      k.j.beam = k.grp(k.j.torso, .07, .28, .14); k.j.beam.rotation.x = Math.PI / 2 + .17; k.j.beam.visible = false;
+      k.part(k.j.beam, loftData([{ y: .05, r: .03, v: 1 }, { y: 2.5, r: .75, v: .5 }, { y: 5, r: 1.6, v: 0 }], 10), 'beam');
+      k.j.weapon = k.grp(k.j.handR, 0, -.05, .012); k.j.weapon.rotation.x = 1.9; k.j.weapon.visible = false;
+      k.part(k.j.weapon, xform(boxData(.1, 1, .034, { uvm: [.5, 1], faces: ['px', 'nx', 'py', 'ny', 'pz', 'nz'] }), M(0, -.14, 0)), 'wood');
     },
   });
 }
@@ -1002,30 +1177,103 @@ function buildMnema() {
   return buildHumanoid({
     name: 'Mnema', scale: 1.02,
     tex: { skin: 'skin', face: 'mnema_face', leg: 'leg', shoe: 'shoe', pelvis: 'mnema_skirt', torso: 'mnema_top', upperArm: 'skin', foreArm: 'skin' },
-    upperArm: [{ y: .01, r: .037 }, { y: -.25, r: .032 }],
-    foreArm: [{ y: 0, r: .032 }, { y: -.225, r: .024 }],
+    upperArm: [{ y: .02, r: .028 }, { y: -.02, r: .037 }, { y: -.13, r: .035 }, { y: -.25, r: .031 }],
+    foreArm: [{ y: 0, r: .031 }, { y: -.08, r: .032 }, { y: -.17, r: .026 }, { y: -.225, r: .022 }],
     armRest: .13,
     // expressive: big arm swing, bounce, sway, head tilt, hair that trails
     style: { legSwing: .58, kneeBend: .85, armSwing: .6, elbow: .32, bounce: .03, twist: .12, lean: .06, idleSway: .035, breath: .008, headTurn: .9, hairSway: .16 },
     extras(k) {
       const A = Math.PI / 180;
-      for (const a of [k.j.armL, k.j.armR]) k.part(a, loftData([{ y: .04, r: .03 }, { y: -.005, r: .06 }, { y: -.085, r: .058 }, { y: -.112, r: .041 }], 6), 'mnema_cloth');   // puff sleeves
-      k.part(k.j.body, loftData([{ y: .12, rx: .103, rz: .08, v: .14 }, { y: .035, rx: .128, rz: .104, v: 0 }], 10), 'mnema_top');                                             // lace hem
+      for (const a of [k.j.armL, k.j.armR]) k.part(a, loftData([{ y: .04, r: .03 }, { y: -.005, r: .06 }, { y: -.085, r: .058 }, { y: -.112, r: .041 }], 10), 'mnema_cloth');   // puff sleeves
+      k.part(k.j.body, loftData([{ y: .12, rx: .103, rz: .08, v: .14 }, { y: .035, rx: .128, rz: .104, v: 0 }], 14), 'mnema_top');                                              // lace hem
       [[.06, -.05, .115, .095, .195, .17], [-.025, -.135, .15, .13, .228, .2], [-.11, -.22, .178, .158, .255, .228]].forEach(t =>                                               // three ruffled tiers
-        k.part(k.j.body, loftData([{ y: t[0], rx: t[2], rz: t[3], v: 1 }, { y: t[1], rx: t[4], rz: t[5], v: 0 }], 10), 'mnema_skirt'));
-      addHair(k, 'mnema_hair', { bangs: .024, bangUv: [.45, 0, .95, 1], arc: 50,
-        curtain: [{ y: .085, rx: .106, rz: .112, v: 1 }, { y: -.05, rx: .113, rz: .116, v: .5 }, { y: -.17, rx: .118, rz: .108, z: -.012, v: .3 }] });
-      for (const s of [1, -1])                                                                                                                                                  // locks over the shoulders
-        k.part(k.j.head, loftData([{ y: 0, rx: .018, rz: .012, x: s * .09, z: .058, v: 1 }, { y: -.2, rx: .021, rz: .013, x: s * .1, z: .074, v: .5 }, { y: -.36, rx: .013, rz: .008, x: s * .104, z: .085, v: .1 }], 4), 'mnema_hair');
-      // long back hair hangs from the neck so it can sway on its own
+        k.part(k.j.body, loftData([{ y: t[0], rx: t[2], rz: t[3], v: 1 }, { y: t[1], rx: t[4], rz: t[5], v: 0 }], 14), 'mnema_skirt'));
+      addHair(k, 'mnema_hair', { arc: 50,
+        under: [{ y: .085, rx: .106, rz: .112, v: 1 }, { y: -.05, rx: .113, rz: .116, v: .5 }, { y: -.17, rx: .118, rz: .108, z: -.012, v: .3 }],
+        fringe: [[-46, .1, .03], [-28, .085, .034], [-10, .08, .034], [8, .082, .034], [26, .085, .034], [44, .1, .03]],
+        locks: [[62, .5, .03, .02, 4], [-62, .5, .03, .02, 4], [84, .3, .036, -.01, 3], [-84, .3, .036, -.01, 3]] });
+      // long back hair hangs from the neck so it can sway on its own: an under-layer plus separate locks
       k.j.hairBack = k.grp(k.j.torso, 0, .46, -.01);
-      k.part(k.j.hairBack, loftData([{ y: .03, rx: .1, rz: .1, v: 1 }, { y: -.2, rx: .135, rz: .125, z: -.015, v: .66 }, { y: -.42, rx: .135, rz: .12, z: -.02, v: .33 }, { y: -.62, rx: .11, rz: .1, z: -.02, v: 0 }], 5, { a0: 92 * A, a1: 268 * A }), 'mnema_hair');
+      const d = loftData([{ y: .03, rx: .1, rz: .1, v: 1 }, { y: -.2, rx: .13, rz: .12, z: -.015, v: .66 }, { y: -.42, rx: .13, rz: .115, z: -.02, v: .33 }, { y: -.6, rx: .105, rz: .095, z: -.02, v: 0 }], 8, { a0: 92 * A, a1: 268 * A });
+      [112, 138, 164, 196, 222, 248].forEach((a, i) => appendData(d, hairLock(a * A, .02, .62 + (i % 2) * .06, .05, { r: .125, out: .022, n: 4, u: i * .12 })));
+      k.part(k.j.hairBack, d, 'mnema_hair');
     },
   });
 }
-const CHARACTERS = { leta: buildLeta, mnema: buildMnema, hollow: buildHollow };   // add further cast here
+/** Monsters: the same skeleton with crude geometry, wrong proportions and a low, stepped animation rate. */
+function buildMonster(o) {
+  const t = o.tex;
+  return buildHumanoid({
+    name: o.name, detail: 'crude', scale: o.scale, headScale: o.head || 1.02, girth: o.girth || 1, limb: o.limb || 1,
+    tex: { skin: t, face: o.face || t, leg: t, shoe: t, pelvis: t, torso: t, upperArm: t, foreArm: t },
+    upperArm: [{ y: .01, r: .034 }, { y: -.25, r: .028 }], foreArm: [{ y: 0, r: .028 }, { y: -.225, r: .02 }], armRest: o.armRest ?? .05,
+    style: { legSwing: .32, kneeBend: .35, armSwing: .05, elbow: 0, bounce: .015, twist: .14, lean: 0, idleSway: .03, breath: .014, headTurn: 1, hairSway: 0, fps: 9, jitter: .1, ...o.style },
+    extras: o.shape || (() => {}),
+  });
+}
+const rags = k => {
+  k.part(k.j.body, loftData([{ y: .1, rx: .105, rz: .085, v: 1 }, { y: -.25, rx: .17, rz: .15, v: .5 }, { y: -.62, rx: .2, rz: .18, v: 0 }], 8), 'rag');
+  k.part(k.j.torso, loftData([{ y: .37, rx: .15, rz: .1, v: 1 }, { y: .16, rx: .17, rz: .125, v: .3 }], 8), 'rag');
+};
+const longArms = s => k => { k.j.armL.scale.setScalar(s); k.j.armR.scale.setScalar(s); };
+const CHARACTERS = {   // add further cast here
+  leta: buildLeta, mnema: buildMnema,
+  // the Hollow of Chapter 1; Wanderers share its body
+  hollow: () => buildMonster({ name: 'Hollow', tex: 'hollow', face: 'hollow_face', scale: 1.16, style: { hunch: .2, tilt: .22 }, shape: rags }),
+  watcher: () => buildMonster({ name: 'Watcher', tex: 'hollow', face: 'hollow_face', scale: 1.36, limb: .78, girth: .82, style: { headTurn: 2.1, idleSway: 0, breath: .003, jitter: .05, fps: 6 },
+    shape(k) { k.j.head.scale.set(.92, 1.5, .95); longArms(1.3)(k); } }),
+  crawler: () => buildMonster({ name: 'Crawler', tex: 'flesh', scale: .95, limb: .85, head: .9, style: { quad: true, fps: 12, jitter: .22, twist: .3 }, shape: longArms(1.32) }),
+  brute: () => buildMonster({ name: 'Brute', tex: 'flesh', scale: 1.4, girth: 1.55, limb: 1.5, head: .78, armRest: .3, style: { hunch: .32, legSwing: .26, twist: .22, bounce: .035, fps: 7, jitter: .06 },
+    shape(k) { k.j.armR.scale.setScalar(1.35); } }),
+  screamer: () => buildMonster({ name: 'Screamer', tex: 'hollow', face: 'scream_face', scale: 1.14, limb: .8, girth: .9, head: 1.3, style: { hunch: .12, fps: 10, jitter: .14, tilt: -.1 } }),
+};
 
-/** Procedural animation: walk/run cycle + idle layer, scaled by each character's style. */
+/* Emote poses (joint angles in radians, functions of time so they can tremble). Negative arm x = forward.
+   Combine with '_' (later names win): 'cry_sit' = crying while seated. */
+const POSES = {
+  cry:    t => ({ aLx: -1.0, aLz: -.22, aRx: -1.0, aRz: .22, eL: -2.4, eR: -2.4, hx: .42, tx: .22 + Math.sin(t * 9) * .028, by: -Math.abs(Math.sin(t * 4.5)) * .012 }),
+  scared: t => ({ aLx: -.75, aLz: -.24, aRx: -.75, aRz: .24, eL: -2.1, eR: -2.1, hx: -.08, tx: -.1, kn: .3, lg: -.15, rz: Math.sin(t * 33) * .014 }),
+  laugh:  t => ({ aRx: -.6, aRz: .22, eR: -2.05, hx: -.26 + Math.sin(t * 11) * .05, tx: -.1, by: Math.abs(Math.sin(t * 10)) * .022 }),
+  reach:  t => ({ aRx: -1.5 + Math.sin(t * 17) * .025, aRz: .06, eR: -.08, hx: .14 }),
+  wave:   t => ({ aRz: -2.5, eR: -.5 + Math.sin(t * 11) * .35 }),
+  stun:   t => ({ aLx: -1.0, aLz: -.3, eL: -2.5, aRx: -1.0, aRz: .3, eR: -2.5, hx: .4, tx: .3, kn: .35, lg: -.2, rz: Math.sin(t * 30) * .02 }),
+  sit:    () => ({ lg: -1.45, kn: 1.45, by: -.27 }),
+};
+/* Action clips: keyframes [time 0..1, pose]. Every frame of a clip lists the same keys.
+   ty = torso yaw, fall = the whole body tipping over backwards. `hold` clips stay on their last frame. */
+const K = {
+  w1: { aRx: -2.6, aRz: -.5, eR: -1.1, ty: -.6, tx: -.1 }, s1: { aRx: -.75, aRz: .45, eR: -.2, ty: .65, tx: .22 },
+  w2: { aRx: -2.9, aRz: -.25, eR: -.5, aLx: -2.6, aLz: -.4, eL: -.9, ty: -.2, tx: -.3, by: 0 }, s2: { aRx: -.85, aRz: .1, eR: -.1, aLx: -1, aLz: -.4, eL: -.5, ty: .25, tx: .5, by: -.1 },
+  dg: { tx: .55, by: -.24, kn: 1, lg: -.7, hx: -.3 }, d0: { tx: 0, by: 0, kn: 0, lg: 0, hx: 0 },
+  ht: { tx: -.4, hx: -.45, aLz: .5, aRz: -.5, by: -.04 }, h0: { tx: 0, hx: 0, aLz: .1, aRz: -.1, by: 0 },
+  up: { aLx: -2.9, aRx: -2.9, eL: -.4, eR: -.4, tx: -.35 }, dn: { aLx: -.9, aRx: -.9, eL: -.1, eR: -.1, tx: .6 },
+  in: { hx: .5, tx: .35, aLz: .2, aRz: -.2, aLx: 0, aRx: 0 }, sc: { hx: -.7, tx: -.3, aLz: 1.1, aRz: -1.1, aLx: -.3, aRx: -.3 },
+};
+const CLIPS = {
+  light: { dur: .5, keys: [[0, K.w1], [.3, K.w1], [.52, K.s1], [1, K.s1]] },
+  heavy: { dur: .95, keys: [[0, K.w2], [.5, K.w2], [.68, K.s2], [1, K.s2]] },
+  dodge: { dur: .45, keys: [[0, K.dg], [.7, K.dg], [1, K.d0]] },
+  hurt:  { dur: .4, keys: [[0, K.ht], [.5, K.ht], [1, K.h0]] },
+  death: { dur: 1.5, hold: true, keys: [[0, { fall: 0, kn: 0, tx: 0, hx: 0, aLz: .1, aRz: -.1 }], [.3, { fall: -.2, kn: .9, tx: -.25, hx: -.4, aLz: .6, aRz: -.6 }],
+    [.75, { fall: -1.45, kn: .2, tx: 0, hx: -.2, aLz: 1, aRz: -1 }], [1, { fall: -1.52, kn: .05, tx: 0, hx: 0, aLz: 1.1, aRz: -1.1 }]] },
+  lunge:  { dur: .6, keys: [[0, { by: -.1, hx: -.6 }], [.5, { by: -.16, hx: -1.3 }], [.7, { by: .1, hx: -.2 }], [1, { by: 0, hx: -.6 }]] },
+  slam:   { dur: 1.25, keys: [[0, K.up], [.55, K.up], [.68, K.dn], [1, K.dn]] },
+  scream: { dur: 1.5, keys: [[0, K.in], [.5, K.in], [.56, K.sc], [1, K.sc]] },
+};
+function playClip(ch, name) { ch.anim.clip = name; ch.anim.clipT = 0; }
+function clipPose(c, t) {
+  const k = c.keys; let i = 0; while (i < k.length - 2 && t > k[i + 1][0]) i++;
+  const a = k[i], b = k[i + 1], u = clamp((t - a[0]) / (b[0] - a[0]), 0, 1), o = {};
+  for (const key in b[1]) o[key] = lerp(a[1][key], b[1][key], u);
+  return o;
+}
+function poseTarget(name, t, clip) {
+  const o = {};
+  if (name) for (const n of name.split('_')) if (POSES[n]) Object.assign(o, POSES[n](t));
+  return clip ? Object.assign(o, clip) : o;
+}
+
+/** Animate one character: locomotion cycle + idle layer, then clips and poses blended over it per bone. */
 function animateCharacter(ch, dt, time) {
   const s = ch.style, j = ch.joints, a = ch.anim, spd = Math.abs(a.speed), moving = spd > .05;
   a.blend += ((moving ? 1 : 0) - a.blend) * Math.min(1, dt * 10);
@@ -1043,8 +1291,7 @@ function animateCharacter(ch, dt, time) {
   j.elbowL.rotation.x = -(s.elbow * (1 + run * 2.2) * w + Math.max(0, -sn) * arm * .5);
   j.elbowR.rotation.x = -(s.elbow * (1 + run * 2.2) * w + Math.max(0, sn) * arm * .5);
   j.body.position.y = ch.baseY + (Math.abs(cs) - .6) * s.bounce * w * (1 + run);
-  j.body.rotation.y = -sn * s.twist * .5 * w;
-  j.body.rotation.z = Math.sin(time * .8) * s.idleSway * iw;
+  j.body.rotation.set(0, -sn * s.twist * .5 * w, Math.sin(time * .8) * s.idleSway * iw);
   j.torso.rotation.set((s.hunch || 0) + s.lean * run * w, sn * s.twist * w, -Math.sin(time * .8) * s.idleSway * .6 * iw);
   j.torso.scale.y = 1 + Math.sin(time * 1.6) * s.breath;
   j.armL.rotation.z = j.armL.userData.restZ + Math.sin(time * .9) * s.idleSway * .7 * iw;
@@ -1055,12 +1302,28 @@ function animateCharacter(ch, dt, time) {
   a.lookYaw += (yaw - a.lookYaw) * Math.min(1, dt * 4);
   j.head.rotation.set(Math.sin(time * .5 + 2) * s.idleSway * .6 * iw, a.lookYaw, (s.tilt || 0) + Math.sin(time * .6 + 1) * s.idleSway * 1.6 * iw);
   if (j.hairBack) j.hairBack.rotation.x = w * s.hairSway * (1 + run) + Math.sin(time * 1.1) * .02 + sn * .03 * w;
-  // pose layer: chapters set ch.anim.pose ('cry', 'laugh', 'cry_sit', ... or null); every joint blends in and out on its own
-  const tgt = poseTarget(a.pose, time), pk = a.pk || (a.pk = {});
+  if (s.quad) {   // on all fours: body pitched forward, arms as front legs, shins trailing
+    j.body.rotation.x = 1.15; j.body.position.y = ch.baseY * .5 + Math.abs(cs) * .03 * w;
+    j.armL.rotation.x = -2.1 + sn * .7 * w; j.armR.rotation.x = -2.1 - sn * .7 * w; j.elbowL.rotation.x = j.elbowR.rotation.x = -.3;
+    j.legL.rotation.x = -1.5 - sn * .5 * w; j.legR.rotation.x = -1.5 + sn * .5 * w; j.kneeL.rotation.x = j.kneeR.rotation.x = 1.9;
+    j.head.rotation.x = -1;
+  }
+  if (s.jitter) {   // monsters twitch: a new small random offset a few times a second
+    const q = Math.floor(time * 9), r = n => (hash2(q, n) - .5) * s.jitter;
+    j.head.rotation.z += r(1) * 1.4; j.head.rotation.x += r(2); j.torso.rotation.z += r(3) * .5; j.armL.rotation.z += r(4); j.armR.rotation.z += r(5);
+  }
+  // clip + pose layer: each bone key blends in and out on its own
+  let clip = null;
+  if (a.clip) {
+    const c = CLIPS[a.clip]; a.clipT += dt;
+    if (a.clipT >= c.dur) { if (c.hold) a.clipT = c.dur; else a.clip = null; }
+    if (a.clip) clip = clipPose(c, a.clipT / c.dur);
+  }
+  const tgt = poseTarget(a.pose, time, clip), pk = a.pk || (a.pk = {}), rv = clip ? 26 : 8, rw = clip ? 18 : 6;
   const P = (k, base, tk = k) => {
     const st = pk[k] || (pk[k] = { v: base, w: 0 }), on = tk in tgt;
-    if (on) st.v += (tgt[tk] - st.v) * Math.min(1, dt * 8);
-    st.w += ((on ? 1 : 0) - st.w) * Math.min(1, dt * 6);
+    if (on) st.v = st.w < .02 ? tgt[tk] : st.v + (tgt[tk] - st.v) * Math.min(1, dt * rv);
+    st.w += ((on ? 1 : 0) - st.w) * Math.min(1, dt * rw);
     return st.w < .003 ? base : lerp(base, st.v, st.w);
   };
   j.armL.rotation.x = P('aLx', j.armL.rotation.x); j.armL.rotation.z = P('aLz', j.armL.rotation.z);
@@ -1068,41 +1331,9 @@ function animateCharacter(ch, dt, time) {
   j.elbowL.rotation.x = P('eL', j.elbowL.rotation.x); j.elbowR.rotation.x = P('eR', j.elbowR.rotation.x);
   j.legL.rotation.x = P('lgL', j.legL.rotation.x, 'lg'); j.legR.rotation.x = P('lgR', j.legR.rotation.x, 'lg');
   j.kneeL.rotation.x = P('knL', j.kneeL.rotation.x, 'kn'); j.kneeR.rotation.x = P('knR', j.kneeR.rotation.x, 'kn');
-  j.head.rotation.x = P('hx', j.head.rotation.x); j.torso.rotation.x = P('tx', j.torso.rotation.x);
+  j.head.rotation.x = P('hx', j.head.rotation.x); j.torso.rotation.x = P('tx', j.torso.rotation.x); j.torso.rotation.y = P('ty', j.torso.rotation.y);
   j.body.position.y += P('by', 0); j.body.rotation.z += P('rz', 0);
-}
-/* Pose targets (joint angles in radians, functions of time so they can tremble or shake). Negative arm x = forward.
-   Combine with '_' (later names win): 'cry_sit' = crying while seated. */
-const POSES = {
-  cry:    t => ({ aLx: -1.0, aLz: -.22, aRx: -1.0, aRz: .22, eL: -2.4, eR: -2.4, hx: .42, tx: .22 + Math.sin(t * 9) * .028, by: -Math.abs(Math.sin(t * 4.5)) * .012 }),
-  scared: t => ({ aLx: -.75, aLz: -.24, aRx: -.75, aRz: .24, eL: -2.1, eR: -2.1, hx: -.08, tx: -.1, kn: .3, lg: -.15, rz: Math.sin(t * 33) * .014 }),
-  laugh:  t => ({ aRx: -.6, aRz: .22, eR: -2.05, hx: -.26 + Math.sin(t * 11) * .05, tx: -.1, by: Math.abs(Math.sin(t * 10)) * .022 }),
-  reach:  t => ({ aRx: -1.5 + Math.sin(t * 17) * .025, aRz: .06, eR: -.08, hx: .14 }),
-  wave:   t => ({ aRz: -2.5, eR: -.5 + Math.sin(t * 11) * .35 }),
-  sit:    () => ({ lg: -1.45, kn: 1.45, by: -.27 }),
-};
-const NO_POSE = {};
-function poseTarget(name, t) {
-  if (!name) return NO_POSE;
-  const o = {}; for (const n of name.split('_')) if (POSES[n]) Object.assign(o, POSES[n](t));
-  return o;
-}
-
-/** The Hollow (Chapter 1 monster): a tall, faceless clay figure in the remains of a shroud. */
-function buildHollow() {
-  return buildHumanoid({
-    name: 'Hollow', scale: 1.16, headScale: 1.02,
-    tex: { skin: 'hollow', face: 'hollow_face', leg: 'hollow', shoe: 'hollow', pelvis: 'hollow', torso: 'hollow', upperArm: 'hollow', foreArm: 'hollow' },
-    upperArm: [{ y: .01, r: .034 }, { y: -.25, r: .028 }],
-    foreArm: [{ y: 0, r: .028 }, { y: -.225, r: .02 }],
-    armRest: .05,
-    // slow shamble, hunched, head hanging to one side
-    style: { legSwing: .32, kneeBend: .35, armSwing: .05, elbow: 0, bounce: .015, twist: .14, lean: 0, idleSway: .03, breath: .014, headTurn: 1, hairSway: 0, hunch: .2, tilt: .22 },
-    extras(k) {
-      k.part(k.j.body, loftData([{ y: .1, rx: .105, rz: .085, v: 1 }, { y: -.25, rx: .17, rz: .15, v: .5 }, { y: -.62, rx: .2, rz: .18, v: 0 }], 8), 'rag');
-      k.part(k.j.torso, loftData([{ y: .37, rx: .15, rz: .1, v: 1 }, { y: .16, rx: .17, rz: .125, v: .3 }], 8), 'rag');
-    },
-  });
+  ch.root.rotation.x = P('fall', 0);
 }
 
 /* ============================== 8. SCENES ============================== */
@@ -1141,6 +1372,11 @@ function addBuilding(B, x0, x1, z0, z1, h, tex = 'facade', tint = [1, 1, 1], fac
   B.box(tex, w, h, d, m, { uvm: [3, 3], faces, tint, ao: .6 });
   B.box('asphalt', w, h, d, m, { faces: ['py'], tint: sh(tint, .6) });
   B.box('sidewalk', w + .3, .25, d + .3, M((x0 + x1) / 2, h, (z0 + z1) / 2), { tint: sh(tint, .7) });
+  if (tint[0] < .8) return;
+  // baked-looking contact shadow on the ground along each wall of the nearer buildings
+  const S = 1.8, y = .014, strip = (a, b, c, e) => B.add('wallshadow', quadData(a, b, c, e), null, { unlit: true });
+  strip([x0, y, z1 + S], [x1, y, z1 + S], [x1, y, z1], [x0, y, z1]); strip([x1, y, z0 - S], [x0, y, z0 - S], [x0, y, z0], [x1, y, z0]);
+  strip([x1 + S, y, z1], [x1 + S, y, z0], [x1, y, z0], [x1, y, z1]); strip([x0 - S, y, z0], [x0 - S, y, z1], [x0, y, z1], [x0, y, z0]);
 }
 function addBarrier(B, x, z, ry) {
   const hx = 1.05 * Math.SQRT2;
@@ -1148,13 +1384,13 @@ function addBarrier(B, x, z, ry) {
     M(x, 0, z, ry), { ao: .65 });
 }
 /** Street lamp at (x, z) with its arm pointing along +/-X. A lit lamp needs env.lampPos at its head. */
-function addLamp(B, x, z, dir, lit) {
+function addLamp(B, x, z, dir, lit, steady) {
   B.add('iron', loftData([{ y: 0, r: .1 }, { y: .5, r: .065 }, { y: 5, r: .05 }], 5), M(x, 0, z), { ao: .7 });
   B.box('iron', 1.2, .07, .07, M(x + dir * .55, 4.93, z)); B.box('iron', .52, .11, .26, M(x + dir, 4.84, z), { faces: ['px', 'nx', 'py', 'pz', 'nz'] });
   if (!lit) return;
-  const hx = x + dir;
-  B.add('glow', quadData([hx - .24, 4.838, z - .11], [hx + .24, 4.838, z - .11], [hx + .24, 4.838, z + .11], [hx - .24, 4.838, z + .11]), null, { lamp: true, tint: [1.4, 1.2, .8] });
-  B.add('cone', loftData([{ y: 4.82, r: .16, v: 1 }, { y: .03, r: 2.7, v: 0 }], 10), M(hx, 0, z), { lamp: true, tint: [1, .84, .52] });
+  const hx = x + dir, o = steady ? { unlit: true } : { lamp: true };       // flickering lamps are baked into their own channel
+  B.add('glow', quadData([hx - .24, 4.838, z - .11], [hx + .24, 4.838, z - .11], [hx + .24, 4.838, z + .11], [hx - .24, 4.838, z + .11]), null, { ...o, tint: [1.4, 1.2, .8] });
+  B.add('cone', loftData([{ y: 4.82, r: .16, v: 1 }, { y: .03, r: 2.7, v: 0 }], 10), M(hx, 0, z), { ...o, tint: [1, .84, .52] });
 }
 function addTree(B, rng, x, z, h) {
   const lx = (rng() - .5) * .25 * h, lz = (rng() - .5) * .2 * h, ry = rng() * 6.28;
@@ -1239,15 +1475,10 @@ registerScene('city_entrance', {
     B.box('sidewalk', .16, .13, 28, M(4, 0, -26), { tint: [.8, .8, .8] }); B.box('sidewalk', .16, .13, 12, M(4, 0, -2), { tint: [.8, .8, .8] });
 
     // ---- buildings
-    const building = (x0, x1, z0, z1, h, tex = 'facade', tint = [1, 1, 1]) => {
-      const m = M((x0 + x1) / 2, 0, (z0 + z1) / 2), w = x1 - x0, d = z1 - z0;
-      B.box(tex, w, h, d, m, { uvm: [3, 3], faces: ['px', 'nx', 'pz', 'nz'], tint, ao: .6 });
-      B.box('asphalt', w, h, d, m, { faces: ['py'], tint: sh(tint, .6) });
-      B.box('sidewalk', w + .3, .25, d + .3, M((x0 + x1) / 2, h, (z0 + z1) / 2), { tint: sh(tint, .7) });
-    };
+    const building = (...a) => addBuilding(B, ...a);
     building(-18.3, -6.3, -18.5, -9.5, 6, 'facade_b');                     // B1: pharmacy block (west)
     building(-21.3, -6.3, -33.5, -18.5, 12);                               // B2
-    building(6.3, 15.3, -21.3, -12.3, 9);                                  // B3 (east, north of the cemetery road)
+    building(6.3, 15.3, -21.3, -12.3, 9, 'facade_k');                                  // B3 (east, north of the cemetery road)
     building(6.3, 18.3, -37.3, -22.3, 15, 'facade_b');                     // B4
     for (const [x0, x1, z0, z1, h] of [[-30, -18, -52, -40, 18], [-12, 2, -58, -44, 24], [8, 22, -56, -42, 15], [24, 38, -48, -34, 21], [-40, -26, -34, -20, 12], [-42, -30, -14, -2, 9], [26, 40, -30, -18, 9]])
       building(x0, x1, z0, z1, h, 'facade', [.7, .72, .75]);
@@ -1284,23 +1515,8 @@ registerScene('city_entrance', {
     B.add('glow', quadData([-4.54, 4.838, -1.11], [-4.06, 4.838, -1.11], [-4.06, 4.838, -.89], [-4.54, 4.838, -.89]), null, { lamp: true, tint: [1.4, 1.2, .8] });
     B.add('cone', loftData([{ y: 4.82, r: .16, v: 1 }, { y: .03, r: 2.7, v: 0 }], 10), M(-4.3, 0, -1), { lamp: true, tint: [1, .84, .52] });
 
-    // ---- abandoned car (local frame: nose toward -Z, driver's side = -X)
-    const CM = M(-1.5, 0, 6.4, .3, 0, .022);
-    B.box('carpaint', 1.74, .5, 4.3, mul(CM, M(0, .3, 0)), { faces: ['py', 'pz', 'nz', 'ny'], uvm: [1.74, 1.4] });
-    B.box('carside', 1.74, .5, 4.3, mul(CM, M(0, .3, 0)), { faces: ['px', 'nx'], fit: true });
-    const cab = { fl: [.84, .8, -.7], fr: [-.84, .8, -.7], bl: [-.84, .8, 1.5], br: [.84, .8, 1.5], tfl: [.7, 1.32, -.15], tfr: [-.7, 1.32, -.15], tbl: [-.7, 1.32, 1], tbr: [.7, 1.32, 1] };
-    B.add('carglass', quadData(cab.fl, cab.fr, cab.tfr, cab.tfl), CM); B.add('carglass', quadData(cab.bl, cab.br, cab.tbr, cab.tbl), CM);
-    B.add('carglass', quadData(cab.br, cab.fl, cab.tfl, cab.tbr), CM); B.add('carglass', quadData(cab.fr, cab.bl, cab.tbl, cab.tfr), CM);
-    B.add('carpaint', quadData(cab.tbl, cab.tbr, cab.tfl, cab.tfr), CM);
-    const wheel = (x, z, flatTyre) => B.add('tire', loftData([{ y: -.11, r: .33 }, { y: .11, r: .33 }], 8, { capStart: true, capEnd: true, uv: [0, .95, .06, 1] }),
-      mul(CM, M(x, flatTyre ? .27 : .33, z, 0, 0, Math.PI / 2), new THREE.Matrix4().makeScale(flatTyre ? .8 : 1, 1, 1)));
-    wheel(.86, -1.35); wheel(-.86, -1.35, true); wheel(.86, 1.4); wheel(-.86, 1.4);
-    B.box('carside', .06, .5, 1.05, mul(CM, M(-.87, .31, -.62, -.95), M(0, 0, .525)), { fit: true });      // open driver's door
-    B.box('dark', .03, .48, 1.05, mul(CM, M(-.875, .31, -.1)));
-    for (const z of [-2.18, 2.18]) B.box('iron', 1.8, .14, .1, mul(CM, M(0, .28, z)));
-    for (const x of [-.6, .6]) B.box('glow', .26, .14, .04, mul(CM, M(x, .56, -2.16)), { unlit: true, tint: [.42, .44, .42] });
-    B.box('plate', .5, .15, .03, mul(CM, M(0, .46, 2.17)), { faces: ['pz'], fit: true });
-    B.add('shadow', quadData([-1.5, .025, 2.9], [1.5, .025, 2.9], [1.5, .025, -2.9], [-1.5, .025, -2.9]), M(-1.5, 0, 6.4, .3));
+    // ---- abandoned car
+    addCar(B, M(-1.5, 0, 6.4, .3, 0, .022), { open: true, flat: true, shadow: [-1.5, 6.4, .3] });
 
     // ---- south end: roadblock, guard rails, speed sign, utility poles
     const sawhorse = (x, z, ry, tipped) => {
@@ -1378,6 +1594,12 @@ registerScene('city_entrance', {
     }
     for (const [x, z] of [[-1.8, -1.8], [1.8, -1.8], [-1.8, 1.8], [1.8, 1.8]]) B.box('rustdark', .3, 10, .3, M(-24 + x, 0, 4 + z, 0, -z * .03, x * .03), { uvm: [1, 2] });
     B.add('rust', loftData([{ y: 10, r: 2.7, v: 0 }, { y: 13.4, r: 2.7, v: 1.5 }, { y: 14.6, r: .2, v: 2 }], 8, { capStart: true, uv: [0, 0, 6, 1] }), M(-24, 0, 4));
+
+    // ---- wear and tear: rubble, standing water, torn posters
+    const R2 = mulberry32(99);
+    addDebris(B, R2, 3.6, -13.2, 1.4, 9); addDebris(B, R2, -4.6, 10.4, 1.1, 6); addDebris(B, R2, 4.8, 3.2, .9, 5); addDebris(B, R2, 12, -11.2, 1, 6);
+    addPuddle(B, env, 1.4, 3.6, 2.6, 1.8, .4); addPuddle(B, env, -2.2, -8.4, 3.2, 2, 1.2); addPuddle(B, env, 9.5, -9.6, 2.4, 1.6, .2); addPuddle(B, env, 2.6, 9.6, 1.8, 1.3, 2);
+    addPoster(B, 'poster', -6.18, 1, -10.1, Math.PI / 2); addPoster(B, 'poster2', -6.18, 1.2, -17.95, Math.PI / 2, [.8, .8, .8]); addPoster(B, 'poster', 6.28, 1.1, -13.4, -Math.PI / 2, [.85, .85, .85]);
 
     // ---- animated bits: drifting ground mist + slow falling ash
     const group = B.build(env); group.add(extras);
@@ -1474,14 +1696,16 @@ registerScene('city_entrance', {
 registerScene('main_street', {
   name: 'Main Street',
   env: { fog: [.4, .45, .51], fogNear: 3, fogFar: 38, fogMax: .97, ambient: [.58, .64, .74], sunDir: [-.4, .8, .45], sunCol: [.4, .4, .4],
-    lampPos: [4.3, 4.5, 14], lampCol: [1.15, .92, .56], lampR: 10 },
+    lampPos: [4.3, 4.5, 14], lampCol: [1.15, .92, .56], lampR: 10, amb: { wind: .8, drone: 1.25, pitch: .94 },
+    lamps: [{ pos: [4.3, 4.5, 14], col: [1.15, .92, .56], r: 10 }, { pos: [-4.3, 4.5, -13], col: [.95, .84, .6], r: 9, steady: true },
+      { pos: [27, 4.5, -34.95], col: [1.15, .92, .56], r: 10 }, { pos: [46, 4.5, -40.05], col: [.8, .86, .98], r: 9, steady: true }] },
   build(env) {
     const B = new StaticBatch(), rng = mulberry32(31), extras = new THREE.Group();
     addSky(B, env);
 
     // ---- ground
     const surf = (x, z) => {
-      if (x > 4 && x < 40 && z > -41 && z < -34) return 'gravel';           // side street to the cemetery
+      if (x > 4 && x < 70 && z > -41 && z < -34) return 'gravel';           // side street to the cemetery
       if (Math.abs(x) < 4) return 'asphalt';
       if (Math.abs(z) < 8.3 && Math.abs(x) < 12) return 'cobble';           // plaza
       if (Math.abs(x) < 6.3) return 'sidewalk';
@@ -1507,8 +1731,8 @@ registerScene('main_street', {
     addBuilding(B, -24, -11.3, -8.3, 8.3, 12, 'facade_b');                  // west plaza recess
     addBuilding(B, -18, WX, -47, -8.3, 12, 'facade_b');
     addBuilding(B, 6.3, 18, 8.3, 36, 12, 'facade_b');
-    addBuilding(B, 11.3, 24, -8.3, 8.3, 9);                                 // east plaza recess
-    addBuilding(B, 6.3, 18, -34, -8.3, 9); addBuilding(B, 18, 30, -34, -14, 12, 'facade_b');
+    addBuilding(B, 11.3, 24, -8.3, 8.3, 9, 'facade_k');                                 // east plaza recess
+    addBuilding(B, 6.3, 18, -34, -8.3, 9, 'facade_k'); addBuilding(B, 18, 30, -34, -14, 12, 'facade_b');
     addBuilding(B, 6.3, 30, -58, -41, 12, 'facade_b');
     addBuilding(B, -22, 6.3, -62, -47, 14, 'facade', [1.06, 1.06, 1.04]);   // town hall
     addBuilding(B, -20, WX, 36, 52, 12, 'facade', [.85, .86, .88]); addBuilding(B, 6.3, 18, 36, 50, 15, 'facade_b', [.85, .86, .88]);
@@ -1521,7 +1745,7 @@ registerScene('main_street', {
       B.box(tex, .12, .72, len, m, { faces: [side < 0 ? 'px' : 'nx'], fit: true }); B.box('rustdark', .12, .72, len, m, { faces: ['py', 'ny', 'pz', 'nz'] });
     };
     strip(-1, 22.6, 35.8, 'shop'); strip(-1, 8.5, 17.4, 'shutter', [1.5, 1.5]);
-    strip(-1, -20, -8.5, 'shop'); strip(-1, -33, -20, 'brick', [1.6, .8]); strip(-1, -46.8, -33, 'shutter', [1.5, 1.5]);
+    strip(-1, -20, -8.5, 'shop_k'); strip(-1, -33, -20, 'brick', [1.6, .8]); strip(-1, -46.8, -33, 'shutter', [1.5, 1.5]);
     strip(1, 20, 35.8, 'brick', [1.6, .8]); strip(1, 8.5, 20, 'shop');
     strip(1, -20, -8.5, 'shop'); strip(1, -33.8, -20, 'shutter', [1.5, 1.5]); strip(1, -46.8, -41.2, 'brick', [1.6, .8]);
     sign(-1, 20, 'sign_atelier', 3.6); sign(1, -11.8, 'sign_flowers'); sign(-1, -14, 'sign_cafe');
@@ -1553,7 +1777,7 @@ registerScene('main_street', {
     B.box('rust', 1.5, 2.2, 1.5, M(-4.9, 0, 28), { uvm: [1.5, 2.2], ao: .6 });
     B.box('shutter', .06, 1.0, 1.2, M(-4.13, .9, 28), { faces: ['px'], uvm: [1.2, 1] });
     B.box('rustdark', 1.9, .08, 1.9, M(-4.9, 2.2, 28), { faces: ['px', 'nx', 'py', 'ny', 'pz', 'nz'] });
-    addLamp(B, 5.3, 14, -1, true); addLamp(B, -5.3, 12, 1, false); addLamp(B, -5.3, -13, 1, false); addLamp(B, 5.3, -30, -1, false);
+    addLamp(B, 5.3, 14, -1, true); addLamp(B, -5.3, 12, 1, false); addLamp(B, -5.3, -13, 1, true, true); addLamp(B, 5.3, -30, -1, false);
     B.box('iron', .09, 2.1, .09, M(5.48, 0, 11.2), { ao: .7 });
     const PM = M(5.3, 1.05, 11.2, Math.PI);
     B.box('rust', .42, .64, .32, PM, { faces: ['nx', 'py', 'ny', 'pz', 'nz'], uvm: [1, 1] }); B.box('phone', .42, .64, .32, PM, { faces: ['px'], fit: true });
@@ -1590,6 +1814,23 @@ registerScene('main_street', {
     B.box('stone', 10.6, .8, .9, M(0, 6, -46.5), { faces: ['px', 'nx', 'py', 'ny', 'pz'] });
     B.box('clock', 2.6, 2.6, .06, M(0, 7.5, -46.94), { faces: ['pz'], fit: true });
 
+    // ---- the lane to the cemetery: more buildings, lamps, a car on its side, the gate at the far end
+    addBuilding(B, 30, 50, -56, -41, 9, 'facade_k'); addBuilding(B, 50, 68, -58, -41, 12); addBuilding(B, 30, 46, -34, -18, 9); addBuilding(B, 46, 68, -34, -16, 12, 'facade_b');
+    for (let z = -40.9; z < -34.05; z += .3) B.box('iron', .04, 2.1, .04, M(61.4, .15, z), { cell: 9 });
+    for (const y of [.28, 2.02]) B.box('iron', .06, .07, 6.9, M(61.4, y, -37.5));
+    addLamp(B, 26, -34.95, 1, true); addLamp(B, 47, -40.05, -1, true, true);
+    addCar(B, M(34.5, .87, -38.6, 1.35, 0, Math.PI / 2), { shadow: [34.5, -38.2, 1.35] });
+    // ---- wear and tear: a car on its roof, rubble, standing water, torn posters
+    const R2 = mulberry32(77);
+    addCar(B, M(2.4, 1.34, 21.5, .5, 0, Math.PI), { shadow: [2.4, 21.5, .5] });
+    [[-4.6, 15.2, 1.1, 7], [4.7, 26, 1, 6], [-2.6, -9.4, 1, 6], [4.6, -26, 1.2, 8], [-4.4, -40, 1, 6], [14, -35.4, .8, 6], [29, -39.6, 1, 7], [36.5, -35.4, .9, 6], [52, -39.8, 1.1, 8]]
+      .forEach(d => addDebris(B, R2, ...d));
+    [[1.6, 28, 2.6, 1.8, .4], [-2.6, 14, 3, 2, 1.2], [8, -4.6, 2.4, 1.7, .3], [-7.6, -2, 2, 1.5, 2], [2.2, -9, 2.8, 1.9, .8], [3, -40, 3, 2, 1.5], [18, -38.4, 2.6, 1.7, .2], [42, -36.2, 3, 2, 1.1], [56, -38.8, 2.4, 1.6, 2.2]]
+      .forEach(p => addPuddle(B, env, ...p));
+    addPoster(B, 'poster', -6.17, 1, -24, Math.PI / 2); addPoster(B, 'poster2', -6.17, 1.2, -29.5, Math.PI / 2, [.8, .8, .8]); addPoster(B, 'poster', -6.17, 1.1, -38, Math.PI / 2, [.7, .7, .7]);
+    addPoster(B, 'poster2', 6.17, 1, 24.5, -Math.PI / 2); addPoster(B, 'poster', 6.17, 1.15, 30, -Math.PI / 2, [.8, .8, .8]); addPoster(B, 'poster', 6.17, 1, -27, -Math.PI / 2);
+    addPoster(B, 'poster', 12, 1.1, -40.98, 0); addPoster(B, 'poster2', 38, 1, -40.98, 0, [.8, .8, .8]); addPoster(B, 'poster2', 22, 1.1, -34.02, Math.PI); addPoster(B, 'poster', 52, 1, -34.02, Math.PI);
+
     // ---- overhead wires (tram line + two across the street)
     const wires = [-1.5, 5.6, 48, -1.5, 5.6, -46];
     for (const z of [26, -28]) for (let k = 0; k < 6; k++) { const P = t => [lerp(-6.3, 6.3, t), 6.4 - Math.sin(t * Math.PI) * .6, z]; wires.push(...P(k / 6), ...P((k + 1) / 6)); }
@@ -1599,17 +1840,30 @@ registerScene('main_street', {
     const group = B.build(env); group.add(extras);
     const atmosphere = makeAtmosphere(extras, rng, [-12, 12, -46, 36]);
     let sobT = 1.5;
-    const party = g => g.inParty('mnema');
+    const party = g => g.inParty('mnema'), done = g => g.flag('ch1.done');
 
     return {
       group,
-      walk: [[-5.5, 5.5, -45.5, 33], [-10.6, 10.6, -7.7, 7.7], [5.5, 19.5, -40.3, -34.7]],
+      walk: [[-5.5, 5.5, -45.5, 33], [-10.6, 10.6, -7.7, 7.7], [5.5, 60.6, -40.3, -34.7]],
       colliders: [
         { x: 7, z: 0, r: 2.3 }, { x: -1.5, z: -21, hx: 1.2, hz: 5.05, rot: 0 }, { x: -4.9, z: 28, hx: .8, hz: .8, rot: 0 },
         { x: 5.4, z: 11.2, r: .34 }, { x: 5.3, z: 14, r: .2 }, { x: -5.3, z: 12, r: .2 }, { x: -5.3, z: -13, r: .2 }, { x: 5.3, z: -30, r: .2 },
         { x: -10.75, z: -4.5, hx: .3, hz: 1, rot: 0 }, { x: -8.6, z: 5, r: .4 }, { x: 9.9, z: 5.6, r: .4 }, { x: .35, z: -18.6, r: .4 }, { x: 5.35, z: -11.9, r: .5 },
+        { x: 2.4, z: 21.5, hx: .95, hz: 2.2, rot: .5 }, { x: 34.36, z: -37.96, hx: .72, hz: 2.2, rot: 1.35 }, { x: 26, z: -34.95, r: .2 }, { x: 47, z: -40.05, r: .2 },
       ],
       mirror: { x: WX - .02, z0: 15.5, z1: 24.5 },
+      /** Monsters appear once the Hollow has come and gone. Killed ones stay dead (flag 'dead.<id>'). */
+      monsters: [
+        { id: 'wa1', kind: 'watcher', x: -4.8, z: -43.4, h: .5, when: done }, { id: 'wa2', kind: 'watcher', x: 13, z: -35.3, h: 3.4, when: done }, { id: 'wa3', kind: 'watcher', x: 43, z: -40, h: -1, when: done },
+        { id: 'wn1', kind: 'wanderer', x: 17, z: -37.5, h: -1.6, when: done }, { id: 'wn2', kind: 'wanderer', x: 22.5, z: -39, h: -1.6, when: done },
+        { id: 'cr1', kind: 'crawler', x: 31, z: -35.6, h: -1.6, when: done }, { id: 'cr2', kind: 'crawler', x: 30.5, z: -39.5, h: -1.6, when: done },
+        { id: 'sc1', kind: 'screamer', x: 49, z: -37.2, h: -1.6, when: done }, { id: 'cr3', kind: 'crawler', x: 51.5, z: -35.6, h: -1.6, when: done },
+        { id: 'br1', kind: 'brute', x: 57, z: -37.6, h: -1.6, when: done },
+      ],
+      pickups: [
+        { id: 'plank', type: 'plank', x: -3.85, z: 27.45, rz: .3 }, { id: 'b1', type: 'bandage', x: 4.75, z: 16.3 }, { id: 'f1', type: 'flower', x: -9.2, z: 3.2 },
+        { id: 'b2', type: 'bandage', x: 20.5, z: -40 }, { id: 'f2', type: 'flower', x: 27.5, z: -40 }, { id: 'm1', type: 'medkit', x: 38.5, z: -35.05, ry: .4 }, { id: 'b3', type: 'bandage', x: 57.5, z: -40 },
+      ],
       spawns: { start: { x: 4.9, z: 32.2, heading: Math.PI } },
       surfaceAt: surf,
       /** Called after the scene is built: put story actors where the flags say they are. */
@@ -1623,6 +1877,7 @@ registerScene('main_street', {
         { id: 'b_tram', rect: [-6, 6, -15, -12], when: party, bark: ['Mnema', 'A tram! Do you think it still goes anywhere?'] },
         { id: 'b_back', rect: [-6, 6, 16, 33], when: party, bark: ['Mnema', "Isn't this the wrong way? ...I'd follow you the wrong way. Just so you know."] },
         { id: 'b_hall', rect: [-6, 6, -46, -41.5], when: g => g.flag('ch1.done'), bark: ['Mnema', "Big doors. I bet they're locked. Everything nice is locked."] },
+        { id: 'cp_lane', rect: [33, 36.5, -41, -34], checkpoint: true, when: g => done(g) && !monsters().some(e => !MON[e.mon.kind].passive && e.mon.state !== 'idle') },
         { id: 'b_east', rect: [8, 20, -41, -34], when: g => g.flag('ch1.done'), bark: ['Mnema', "It's darker down there. That's fine. I'm fine. Are you fine?"] },
       ],
       interactables: [
@@ -1668,9 +1923,10 @@ registerScene('main_street', {
         { id: 'kiosk', at: [[-3.9, 28]], r: 1.3, h: 1.6, run: examine('kiosk', ['A newspaper kiosk. Shuttered.', 'The headline rack is empty. The price list is still up.'], ['Shuttered.']) },
         { id: 'gap', at: [[5, 33.7]], r: 1.1, h: 1.1, run: examine('gap2', ['The gap I came through.', 'Nothing behind it has changed. I have no reason to go back.'], ['The way back. Not yet.'],
           [['M', "Is that the way out? ...You're not going out. Okay. Okay! Cemetery first."]]) },
-        { id: 'eastroad', at: [[18.8, -37.5]], r: 1.8, h: 1.4, verb: 'Look', run: async g => {
-          await g.lines(['The side street runs east, downhill, into the fog.', 'The bell has stopped. The road it came from has not gone anywhere.']);
-          await g.system('To be continued in Chapter 2.');
+        { id: 'lanegate', at: [[60.4, -37.5]], r: 1.9, h: 1.4, verb: 'Go on', run: async g => {
+          if (!g.flag('ch1.done')) return g.say('An iron gate across the lane. I have no reason to go through. Not yet.');
+          await g.lines(['The gate at the end of the lane. Unlocked.', 'Beyond it the road drops toward the chapel.']);
+          await g.transition('chapter2');
         } },
       ],
       update(dt, t, cam) {
@@ -1684,17 +1940,111 @@ registerScene('main_street', {
   },
 });
 
+/** A dead car in the local frame CM (nose toward -Z, driver's side = -X). Roll CM to put it on its side or roof. */
+function addCar(B, CM, o = {}) {
+  B.box('carpaint', 1.74, .5, 4.3, mul(CM, M(0, .3, 0)), { faces: ['py', 'pz', 'nz', 'ny'], uvm: [1.74, 1.4] });
+  B.box('carside', 1.74, .5, 4.3, mul(CM, M(0, .3, 0)), { faces: ['px', 'nx'], fit: true });
+  const c = { fl: [.84, .8, -.7], fr: [-.84, .8, -.7], bl: [-.84, .8, 1.5], br: [.84, .8, 1.5], tfl: [.7, 1.32, -.15], tfr: [-.7, 1.32, -.15], tbl: [-.7, 1.32, 1], tbr: [.7, 1.32, 1] };
+  B.add('carglass', quadData(c.fl, c.fr, c.tfr, c.tfl), CM); B.add('carglass', quadData(c.bl, c.br, c.tbr, c.tbl), CM);
+  B.add('carglass', quadData(c.br, c.fl, c.tfl, c.tbr), CM); B.add('carglass', quadData(c.fr, c.bl, c.tbl, c.tfr), CM);
+  B.add('carpaint', quadData(c.tbl, c.tbr, c.tfl, c.tfr), CM);
+  const wheel = (x, z, flat) => B.add('tire', loftData([{ y: -.11, r: .33 }, { y: .11, r: .33 }], 8, { capStart: true, capEnd: true, uv: [0, .95, .06, 1] }),
+    mul(CM, M(x, flat ? .27 : .33, z, 0, 0, Math.PI / 2), new THREE.Matrix4().makeScale(flat ? .8 : 1, 1, 1)));
+  wheel(.86, -1.35); wheel(-.86, -1.35, o.flat); wheel(.86, 1.4); wheel(-.86, 1.4);
+  if (o.open) {                                                            // driver's door left open
+    B.box('carside', .06, .5, 1.05, mul(CM, M(-.87, .31, -.62, -.95), M(0, 0, .525)), { fit: true });
+    B.box('dark', .03, .48, 1.05, mul(CM, M(-.875, .31, -.1)));
+  }
+  for (const z of [-2.18, 2.18]) B.box('iron', 1.8, .14, .1, mul(CM, M(0, .28, z)));
+  for (const x of [-.6, .6]) B.box('glow', .26, .14, .04, mul(CM, M(x, .56, -2.16)), { unlit: true, tint: [.42, .44, .42] });
+  B.box('plate', .5, .15, .03, mul(CM, M(0, .46, 2.17)), { faces: ['pz'], fit: true });
+  if (o.shadow) B.add('shadow', quadData([-1.5, .025, 2.9], [1.5, .025, 2.9], [1.5, .025, -2.9], [-1.5, .025, -2.9]), M(o.shadow[0], 0, o.shadow[1], o.shadow[2]));
+}
+/** A scatter of bricks, planks and broken concrete. */
+function addDebris(B, rng, x, z, r = 1, n = 7) {
+  for (let i = 0; i < n; i++) {
+    const a = rng() * 6.28, d = rng() * r, px = x + Math.sin(a) * d, pz = z + Math.cos(a) * d, k = rng();
+    if (k < .4) B.box('brick', .22, .1, .11, M(px, 0, pz, rng() * 3), { uvm: [.4, .2], cam: false });
+    else if (k < .7) B.box('wood', .12 + rng() * .1, .04, .6 + rng() * .9, M(px, .02, pz, rng() * 3, (rng() - .5) * .3), { cam: false, tint: [.7, .68, .66] });
+    else B.box('sidewalk', .3 + rng() * .4, .12 + rng() * .2, .3 + rng() * .3, M(px, -.03, pz, rng() * 3, (rng() - .5) * .5, (rng() - .5) * .5), { uvm: [1, 1], cam: false });
+  }
+}
+/** Standing water: an unlit decal the colour of the sky. */
+function addPuddle(B, env, x, z, w, d, ry = 0) {
+  B.add('puddle', quadData([-w / 2, .024, d / 2], [w / 2, .024, d / 2], [w / 2, .024, -d / 2], [-w / 2, .024, -d / 2]), M(x, 0, z, ry), { unlit: true, tint: sh(env.fog, 1.3) });
+}
+/** A torn poster on a wall; `ry` turns its face (0 = facing +Z). */
+function addPoster(B, tex, x, y, z, ry, tint = [.95, .95, .95]) {
+  B.add(tex, quadData([-.45, 0, 0], [.45, 0, 0], [.45, 1.2, 0], [-.45, 1.2, 0]), M(x, y, z, ry), { tint });
+}
+
+/* ---------- Scene: Chapel Road (Chapter 2 — placeholder) ----------
+   A walled road running north (-Z) to the cemetery gate. Dusk: this is where the flashlight earns its keep. */
+registerScene('chapel_road', {
+  name: 'Chapel Road',
+  env: { fog: [.2, .235, .29], fogNear: 2, fogFar: 30, fogMax: .98, ambient: [.34, .39, .5], sunDir: [-.4, .8, .45], sunCol: [.16, .17, .2],
+    lampPos: [1.2, 4.5, -6], lampCol: [1.15, .92, .56], lampR: 10, flash: 1, amb: { wind: 1.4, drone: 1.7, pitch: .84 } },
+  build(env) {
+    const B = new StaticBatch(), rng = mulberry32(57), extras = new THREE.Group();
+    addSky(B, env);
+    const surf = (x, z) => Math.abs(x) < 3 ? 'gravel' : 'grass', tint = p => { const k = .8 + .3 * hash2(p.x * .37, p.z * .53); return [k, k, k]; };
+    for (let x = -16; x < 16; x += 2) for (let z = -40; z < 24; z += 2) B.add(surf(x + 1, z + 1), quadData([x, 0, z + 2], [x + 2, 0, z + 2], [x + 2, 0, z], [x, 0, z]), null, { tint });
+    addGroundRing(B, [-16, 16, -40, 24], surf, tint);
+    // walls, the lane gate behind and the cemetery gate ahead
+    for (const s of [-1, 1]) {
+      B.box('brick', .36, 1.25, 52, M(s * 3.6, 0, -4), { uvm: [1.6, .8], ao: .6 }); B.box('sidewalk', .46, .08, 52, M(s * 3.6, 1.25, -4), { tint: [.8, .8, .8] });
+      for (const z of [-30, 22]) { B.box('brick', .56, 2.6, .56, M(s * 3.6, 0, z), { uvm: [1.6, .8], ao: .6 }); B.box('sidewalk', .7, .12, .7, M(s * 3.6, 2.6, z)); }
+    }
+    for (let x = -3.3; x < 3.31; x += .3) if (Math.abs(x) > .75) B.box('iron', .04, 2.1, .04, M(x, .15, -30), { cell: 9 });   // cemetery gate, standing open
+    for (let x = -3.3; x < 3.31; x += .3) B.box('iron', .04, 2.1, .04, M(x, .15, 22), { cell: 9 });
+    for (const z of [-30, 22]) B.box('iron', 6.9, .07, .06, M(0, 2.2, z));
+    addLamp(B, 2.2, -6, -1, true);
+    B.box('wood', 1.9, .06, .45, M(-2.6, .45, 6)); for (const x of [-3.4, -1.8]) B.box('iron', .06, .45, .4, M(x, 0, 6));
+    // graves, trees and the chapel in the fog
+    for (let i = 0; i < 26; i++) {
+      const s = rng() > .5 ? 1 : -1, x = s * (5 + rng() * 10), z = -34 + rng() * 52, m = M(x, 0, z, (rng() - .5) * .5, (rng() - .5) * .16);
+      if (i % 3) B.box('barrier', .6, .5 + rng() * .5, .16, m, { tint: [.8, .82, .84], ao: .6 });
+      else { B.box('barrier', .14, 1.3, .14, m, { tint: [.8, .82, .84], ao: .6 }); B.box('barrier', .7, .14, .14, mul(m, M(0, .85, 0)), { tint: [.8, .82, .84] }); }
+    }
+    [[-6, 12, 7], [7, 4, 8], [-9, -8, 7.5], [6.5, -14, 7], [-5.5, -24, 8], [11, -26, 9]].forEach(t => addTree(B, rng, ...t));
+    addBuilding(B, -7, 7, -64, -48, 9, 'facade_k', [.86, .88, .92]); B.box('stone', 4, 20, 4, M(0, 0, -50), { uvm: [2, 2], tint: [.8, .82, .86] });
+    B.add('rustdark', loftData([{ y: 20, rx: 2.9, rz: 2.9 }, { y: 27, r: .1 }], 4, { halfStep: true }), M(0, 0, -50));
+    const R2 = mulberry32(5);
+    addDebris(B, R2, -2.2, 16, 1, 6); addDebris(B, R2, 2.4, -18, .9, 5); addPuddle(B, env, .6, 10, 2.6, 1.8, .5); addPuddle(B, env, -1, -12, 3, 2, 1.4); addPuddle(B, env, 1.4, -24, 2.2, 1.6, .2);
+    const group = B.build(env); group.add(extras);
+    const atmosphere = makeAtmosphere(extras, rng, [-10, 10, -30, 22], 7);
+    return {
+      group,
+      walk: [[-3.1, 3.1, -29.2, 21.2]],
+      colliders: [{ x: 2.2, z: -6, r: .2 }, { x: -2.6, z: 6, hx: 1, hz: .3, rot: 0 }],
+      spawns: { start: { x: 0, z: 19.5, heading: Math.PI } },
+      surfaceAt: surf,
+      monsters: [{ id: 'c2w1', kind: 'watcher', x: -7.2, z: -3, h: 1.6 }, { id: 'c2w2', kind: 'watcher', x: 8, z: -19, h: -1.6 }, { id: 'c2n1', kind: 'wanderer', x: 1.2, z: -26, h: 0 }],
+      pickups: [{ id: 'c2b1', type: 'bandage', x: -2.6, z: 6, y: .5 }],
+      triggers: [{ id: 'c2_watch', rect: [-3.2, 3.2, -8, 2], when: g => g.inParty('mnema'), bark: ['Mnema', "Don't look at the graves. Something in there is looking back."] }],
+      interactables: [
+        { id: 'lanegate2', at: [[0, 21.4]], r: 1.6, h: 1.4, run: examine('lanegate2', ['The lane gate. It has closed behind us.', 'I did not close it.'], ['Closed.']) },
+        { id: 'cemgate', at: [[0, -29.4]], r: 2, h: 1.4, verb: 'Enter', run: async g => {
+          await g.lines(['The cemetery gate. It is standing open.', 'The chapel is somewhere behind the fog. The bell has not rung again.']);
+          await g.system('End of the current build. Chapter 2 continues here.');
+        } },
+      ],
+      update(dt, t, cam) { atmosphere(dt, t, cam); },
+    };
+  },
+});
+
 /* ============================== 9. CHAPTERS ============================== */
 /* A chapter = where it starts + an opening script. Story beats are plain async functions that
    scenes hang on triggers; they get the `Script` API (talk / choice / cam / walkTo / pose / flags).
    Dialogue lists: a string is Leta's inner voice, ['L' | 'M' | 'H', text, pose?] is a spoken line
-   (Leta / Mnema / the Hollow), a function is an inline action. To add Chapter 2: register its
-   scenes above, then registerChapter('chapter2', { ... }) and point the 'eastroad' exit at it. */
+   (Leta / Mnema / the Hollow), a function is an inline action. Chapters are joined with
+   g.transition('chapterN'): fade, title card, autosave, slow fade in. */
 const CHAPTERS = {};
 function registerChapter(id, def) { CHAPTERS[id] = def; }
 
 registerChapter('prologue', {
-  title: 'Prologue', scene: 'city_entrance', spawn: 'start',
+  title: 'Prologue', subtitle: 'The Road In', scene: 'city_entrance', spawn: 'start',
   async onStart(g) {
     await sleep(.9);
     await g.lines(['...', 'Asphodel.', 'The fog starts exactly where the map said the town would be.']);
@@ -1704,9 +2054,8 @@ registerChapter('prologue', {
 /* ---------- Chapter 1: A Voice in the Fog ----------
    Every choice quietly moves the hidden attachment counter (g.attach) and colours the next lines. */
 registerChapter('chapter1', {
-  title: 'Chapter 1', scene: 'main_street', spawn: 'start',
+  title: 'Chapter 1', subtitle: 'A Voice in the Fog', scene: 'main_street', spawn: 'start',
   async onStart(g) {
-    await g.card('CHAPTER 1', 'A Voice in the Fog');
     await g.lines(['Main street. The shop windows are still dressed for customers.', 'Somewhere ahead, someone is crying.', 'I note it the way I would note rain.']);
   },
 });
@@ -1823,8 +2172,8 @@ async function ch1Hollow(g) {
     : a <= -1 ? [['L', 'Keep up.'], ['M', 'This IS me keeping up! This is what it looks like!', null]]
     : [['L', 'This way.'], ['M', 'Right behind you! Not too far behind. Medium behind.', null]]);
   g.pose('mnema', null);
-  g.setFlag('ch1.done'); g.save();
-  await g.card('END OF CHAPTER 1', 'Progress saved');
+  g.setFlag('ch1.done'); g.populate(); g.checkpoint();                   // the street is no longer empty
+  await g.system('The bell came from the east. The side street leads that way.');
 }
 
 /** Context action when Mnema is close and nothing else is: she always has something to say. */
@@ -1841,6 +2190,15 @@ const TALK_MNEMA = { id: 'talk', verb: 'Talk', h: 1.8, run: async g => {
   const n = G.flags['mn.talk'] || 0; G.flags['mn.talk'] = n + 1;
   await g.talk(pool[n % pool.length]);
 } };
+
+/* ---------- Chapter 2: The Chapel Road (placeholder) ---------- */
+registerChapter('chapter2', {
+  title: 'Chapter 2', subtitle: 'The Chapel Road', scene: 'chapel_road', spawn: 'start',
+  async onStart(g) {
+    await g.talk(['The lane ends where the lamps do.', 'I have had my light on the whole way. I notice it now.',
+      ...(g.inParty('mnema') ? [['M', 'It got dark. Did it get dark, or did we walk into it?'], ['M', "...Don't answer that. Walk in front. Please."]] : [])]);
+  },
+});
 
 /* ============================== 10. RENDERER + POST ============================== */
 /* Pipeline: scene -> 240p target (nearest) -> "signal" pass at 240p (VHS line jitter, chroma
@@ -1867,14 +2225,15 @@ void main() {
   gl_FragColor = vec4(c, 1.0);
 }`;
 const PRESENT_FS = `
-uniform sampler2D tSignal; uniform vec2 uRes; uniform vec2 uOut; uniform float uScan; uniform float uFade;
+uniform sampler2D tSignal; uniform vec2 uRes; uniform vec2 uOut; uniform float uScan; uniform float uFade; uniform vec4 uFlash;
 varying vec2 vUv;
 void main() {
   vec2 p = vUv * uRes, f = fract(p), sc = max(uOut / uRes, vec2(1.0));
   vec2 q = floor(p) + clamp(f * sc, 0.0, 0.5) + clamp((f - 1.0) * sc + 0.5, 0.0, 0.5);       // sharp-bilinear upscale
   vec3 c = texture2D(tSignal, q / uRes).rgb;
   c *= 1.0 - uScan * (0.5 - 0.5 * cos(p.y * 6.2831853));                                     // scanlines
-  vec2 d = vUv - 0.5; c *= 1.0 - dot(d, d) * 0.6;                                            // vignette
+  vec2 d = vUv - 0.5; c *= 1.0 - dot(d, d) * 0.8;                                            // vignette
+  c = mix(c, uFlash.rgb, uFlash.a);                                                          // hit / hurt flash
   gl_FragColor = vec4(c * uFade, 1.0);
 }`;
 function initRenderer() {
@@ -1884,7 +2243,7 @@ function initRenderer() {
   camera = new THREE.PerspectiveCamera(CFG.camFov, 4 / 3, .1, 300);
   postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   signalPass = new THREE.ShaderMaterial({ uniforms: { tScene: { value: null }, uRes: { value: new THREE.Vector2() }, uTime: { value: 0 }, uLoFi: { value: 1 } }, vertexShader: POST_VS, fragmentShader: SIGNAL_FS, depthTest: false, depthWrite: false });
-  presentPass = new THREE.ShaderMaterial({ uniforms: { tSignal: { value: null }, uRes: { value: new THREE.Vector2() }, uOut: { value: new THREE.Vector2() }, uScan: { value: 0 }, uFade: { value: 0 } }, vertexShader: POST_VS, fragmentShader: PRESENT_FS, depthTest: false, depthWrite: false });
+  presentPass = new THREE.ShaderMaterial({ uniforms: { tSignal: { value: null }, uRes: { value: new THREE.Vector2() }, uOut: { value: new THREE.Vector2() }, uScan: { value: 0 }, uFade: { value: 0 }, uFlash: { value: new THREE.Vector4() } }, vertexShader: POST_VS, fragmentShader: PRESENT_FS, depthTest: false, depthWrite: false });
   postQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), signalPass); postQuad.frustumCulled = false;
 }
 /** Fit the stage to the window: 4:3..16:9 letterboxed in landscape, 4:3 on top with controls below in portrait. */
@@ -1895,13 +2254,13 @@ function layout() {
   else { const asp = clamp(vw / vh, CFG.aspectMin, CFG.aspectMax); sh = Math.min(vh, vw / asp); sw = sh * asp; left = (vw - sw) / 2; top = (vh - sh) / 2; }
   Object.assign($('#stage').style, { left: left + 'px', top: top + 'px', width: sw + 'px', height: sh + 'px' });
   document.body.classList.toggle('portrait', portrait);
-  View.stageW = sw; View.stageH = sh; View.aspect = sw / sh; View.u = sh / CFG.lowH;
+  View.stageW = sw; View.stageH = sh; View.aspect = sw / sh; View.u = sh / CFG.uiH;
   document.documentElement.style.setProperty('--u', View.u + 'px');
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   renderer.setSize(Math.round(sw * dpr), Math.round(sh * dpr), false);
   // portrait: centre the touch controls in the free area under the picture
   const free = vh - (top + sh), by = portrait ? Math.max(18, free / 2 - 68) : 24;
-  $('#stick').style.bottom = by + 'px'; $('#btnA').style.bottom = (by + 22) + 'px';
+  $('#stick').style.bottom = by + 'px'; $('#btnA').style.bottom = (by + 22) + 'px'; $('#btnAtk').style.bottom = (by + 4) + 'px'; $('#btnDodge').style.bottom = (by + 122) + 'px';
   setupTargets();
 }
 /** (Re)create render targets; called on resize and when the pixelation setting changes. */
@@ -1912,13 +2271,13 @@ function setupTargets() {
   rtScene = new THREE.WebGLRenderTarget(W, H, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: true });
   rtSignal = new THREE.WebGLRenderTarget(W, H, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false });
   SHARED.uSnap.value.set(Math.round(CFG.lowH * View.aspect) / 2, CFG.lowH / 2);              // vertices always snap to a 240p grid
-  signalPass.uniforms.tScene.value = rtScene.texture; signalPass.uniforms.uRes.value.set(W, H); signalPass.uniforms.uLoFi.value = pix ? 1 : 0;
+  signalPass.uniforms.tScene.value = rtScene.texture; signalPass.uniforms.uRes.value.set(W, H); signalPass.uniforms.uLoFi.value = pix ? .5 : 0;
   presentPass.uniforms.tSignal.value = rtSignal.texture; presentPass.uniforms.uRes.value.set(W, H); presentPass.uniforms.uOut.value.set(cv.width, cv.height);
   presentPass.uniforms.uScan.value = pix && cv.height / H >= 3 ? .14 : 0;
   camera.aspect = View.aspect; camera.updateProjectionMatrix();
 }
 function renderFrame(time, fade) {
-  signalPass.uniforms.uTime.value = time; presentPass.uniforms.uFade.value = fade;
+  signalPass.uniforms.uTime.value = time; presentPass.uniforms.uFade.value = fade; presentPass.uniforms.uFlash.value.set(...G.flash);
   renderer.setRenderTarget(rtScene); renderer.clear(); renderer.render(scene, camera);
   postQuad.material = signalPass; renderer.setRenderTarget(rtSignal); renderer.render(postQuad, postCam);
   postQuad.material = presentPass; renderer.setRenderTarget(null); renderer.render(postQuad, postCam);
@@ -1929,15 +2288,19 @@ function applyEnv(env) {
   SHARED.uLampPos.value.set(...env.lampPos); SHARED.uLampCol.value.set(...env.lampCol); SHARED.uLampR.value = env.lampR; SHARED.uFlicker.value = 1;
   renderer.setClearColor(new THREE.Color(...env.fog), 1);
   scene.fog.color.setRGB(...env.fog); scene.fog.near = env.fogNear; scene.fog.far = env.fogFar;
+  Sound.ambience(env.amb, 5);
 }
 
 /* ============================== 11. INPUT ============================== */
 /* Keyboard + mouse, gamepad and touch all feed the same things: a movement axis, a look axis
    (plus raw mouse / drag deltas), a sprint flag, and logical buttons routed by onButton().
      Move:  WASD | left stick | virtual stick          Look: mouse | arrow keys | right stick | drag
-     Sprint: Shift | B / RT / L3 | push the stick fully  Interact: E / Space | A / X | ACT button */
+     Sprint: Shift | RT / L3 | push the stick fully      Interact: E | A | ACT button
+     Swing: J / left click | X | ATK    Heavy: K / right click | Y | hold ATK    Dodge: Space | B | DODGE
+     Items: I | Back | ITEM             Flashlight: F | LB */
 const KEYMAP = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
-  Enter: 'confirm', Space: 'confirm', KeyE: 'confirm', KeyF: 'confirm', Escape: 'cancel', Backspace: 'cancel', KeyP: 'pause', Tab: 'pause' };
+  Enter: 'confirm', KeyE: 'confirm', Escape: 'cancel', Backspace: 'cancel', KeyP: 'pause',
+  Space: 'dodge', KeyJ: 'light', KeyK: 'heavy', KeyI: 'inv', Tab: 'inv', KeyF: 'flash' };
 const Input = {
   keys: new Set(), stick: { x: 0, y: 0, active: false }, pad: { mx: 0, my: 0, lx: 0, ly: 0, run: false, on: false, was: {} }, mdx: 0, mdy: 0,
   k(code) { return this.keys.has(code) ? 1 : 0; },
@@ -1989,7 +2352,7 @@ function initInput() {
   document.addEventListener('pointerlockchange', () => { if (!document.pointerLockElement && G.state === 'play') openPause(); });   // Esc releases the lock
   let lookId = null, lx = 0, ly = 0, dragged = 0;
   window.addEventListener('pointerdown', e => {
-    if (e.target.closest && e.target.closest('#stick,#btnA,#btnMenu,#menu,#marker')) return;
+    if (e.target.closest && e.target.closest('#touch > *,#menu,#marker')) return;
     if (G.state !== 'play' && G.state !== 'dialogue') return;
     lookId = e.pointerId; lx = e.clientX; ly = e.clientY; dragged = 0;
   });
@@ -2009,26 +2372,33 @@ function initInput() {
   $('#marker').addEventListener('click', e => { e.stopPropagation(); Sound.unlock(); if (G.state === 'play') tryInteract(); });
   document.addEventListener('visibilitychange', () => { if (Sound.ctx) document.hidden ? Sound.ctx.suspend() : Sound.ctx.resume(); });
 }
-/** Gamepad: left stick moves, right stick looks, A / X interact, B / RT / L3 sprint, Start pauses. */
+/** Gamepad: sticks move and look, A interact, X / Y light / heavy swing, B dodge, RT / L3 sprint, LB light, Back items, Start pause. */
 function pollGamepad() {
   const P = Input.pad, list = navigator.getGamepads ? navigator.getGamepads() : [];
   let gp = null; for (const g of list) if (g && g.connected) { gp = g; break; }
   if (!gp) { if (P.on) { P.mx = P.my = P.lx = P.ly = 0; P.run = false; P.on = false; } return; }
   P.on = true;
-  const dz = v => Math.abs(v || 0) < .2 ? 0 : v, down = i => !!(gp.buttons[i] && gp.buttons[i].pressed);
+  const dz = v => Math.abs(v || 0) < .2 ? 0 : v, down = i => !!(gp.buttons[i] && gp.buttons[i].pressed), ui = Dialogue.active || !!Menu.current;
   P.mx = dz(gp.axes[0]); P.my = -dz(gp.axes[1]); P.lx = dz(gp.axes[2]) * 1.3; P.ly = dz(gp.axes[3]) * 1.3;
-  P.run = down(1) || down(7) || down(10);
+  P.run = down(7) || down(10);
   const edge = (id, on, btn) => { if (on && !P.was[id]) onButton(btn); P.was[id] = on; };
-  edge('a', down(0) || down(2), 'confirm'); edge('start', down(9), 'pause');
-  edge('b', down(1) && (Dialogue.active || !!Menu.current), 'cancel');
+  edge('a', down(0), 'confirm'); edge('x', down(2), ui ? 'confirm' : 'light'); edge('y', down(3), 'heavy'); edge('b', down(1), ui ? 'cancel' : 'dodge');
+  edge('start', down(9), 'pause'); edge('back', down(8), 'inv'); edge('lb', down(4), 'flash');
   edge('u', down(12) || gp.axes[1] < -.6, 'up'); edge('d', down(13) || gp.axes[1] > .6, 'down');
   edge('l', down(14) || gp.axes[0] < -.6, 'left'); edge('r', down(15) || gp.axes[0] > .6, 'right');
 }
 /** Route a logical button to whoever has focus: dialogue > menu > gameplay. */
 function onButton(b) {
+  if (b === 'dodge' && (Dialogue.active || Menu.current)) b = 'confirm';   // Space advances text and confirms in menus
+  if (b === 'inv' && Menu.current) b = 'cancel';
   if (Dialogue.active) return Dialogue.onButton(b);
   if (Menu.current) return Menu.onButton(b);
-  if (G.state === 'play') { if (b === 'confirm') tryInteract(); else if (b === 'cancel' || b === 'pause') openPause(); }
+  if (G.state !== 'play') return;
+  if (b === 'confirm') tryInteract();
+  else if (b === 'light' || b === 'heavy' || b === 'dodge') playerAct(b);
+  else if (b === 'inv') openInventory();
+  else if (b === 'flash') { G.light = !G.light; Sound.ui('move'); }
+  else if (b === 'cancel' || b === 'pause') openPause();
 }
 
 /* ============================== 12. DIALOGUE UI ============================== */
@@ -2125,7 +2495,7 @@ const Menu = {
       const lab = document.createElement('span'); lab.className = 'mi-label'; lab.textContent = it.label; row.appendChild(lab);
       if (it.value) {
         const v = document.createElement('span'); v.className = 'mi-val';
-        v.innerHTML = '<b data-d="-1">&lt;</b><i></i><b data-d="1">&gt;</b>'; v.querySelector('i').textContent = it.value(); row.appendChild(v);
+        v.innerHTML = it.adjust ? '<b data-d="-1">&lt;</b><i></i><b data-d="1">&gt;</b>' : '<i></i>'; v.querySelector('i').textContent = it.value(); row.appendChild(v);
       }
       row.addEventListener('pointerenter', () => { if (!dis && e.sel !== i) { e.sel = i; el.querySelectorAll('.mi').forEach((r, k) => r.classList.toggle('sel', k === i)); } });
       row.addEventListener('click', ev => { ev.stopPropagation(); Sound.unlock(); this.activate(i, +(ev.target.dataset.d || 0)); });
@@ -2146,8 +2516,8 @@ const settingsMenu = () => ({
     { label: 'Back', select() { Menu.back(); } },
   ],
   help: () => document.body.classList.contains('touch')
-    ? 'Left stick: move (push it fully to sprint). Drag anywhere: look. ACT: interact.'
-    : 'WASD: move. Mouse or arrow keys: look. SHIFT: sprint. E: interact. Gamepads work too.',
+    ? 'Stick: move (push fully to sprint). Drag: look. ACT: interact. ATK: swing, hold for heavy. DODGE. ITEM: inventory.'
+    : 'WASD move. Mouse / arrows look. SHIFT sprint. E interact. J or left click: swing. K or right click: heavy. SPACE dodge. I items. F light.',
 });
 const titleMenu = () => ({
   logo: true,
@@ -2161,10 +2531,11 @@ const pauseMenu = () => ({
   title: 'PAUSED', panel: true, onBack() { setState('play'); lockPointer(); },
   items: [
     { label: 'Resume', select() { Menu.back(); } },
+    { label: 'Inventory', select() { Menu.open(inventoryMenu(true)); } },
     { label: 'Settings', select() { Menu.open(settingsMenu()); } },
     { label: 'Quit to Title', select() { quitToTitle(); } },
   ],
-  help: () => 'Progress is saved at pay phones.',
+  help: () => 'Progress is saved at pay phones and at checkpoints.',
 });
 /** Title logo: serif text rasterised at low resolution and thresholded to hard pixels. */
 function drawLogo(text) {
@@ -2187,6 +2558,8 @@ const G = {
   state: 'boot', time: 0, playtime: 0, flags: {}, chapter: null, sceneId: null, scene: null, col: null,
   actors: {}, player: null, mirror: null, fade: 0, fadeTarget: 0, fadeRate: 1, fadeDone: null, busy: false,
   camMode: 'title', cam: { yaw: Math.PI, pitch: .2, cur: CFG.camDist, x: 0, z: 0 }, cine: null, target: null,
+  hp: 100, sta: 100, staDelay: 0, inv: { bandage: 0, flower: 0, medkit: 0 }, act: { type: null, t: 0 },   // health, stamina, items, current action
+  invuln: 0, hitstop: 0, shake: 0, flash: [0, 0, 0, 0], light: true, fx: [],
 };
 function setState(s) { G.state = s; document.body.dataset.state = s; }
 function fadeTo(v, dur = .7) { return new Promise(res => { G.fadeTarget = v; G.fadeRate = 1 / Math.max(.01, dur); G.fadeDone = res; }); }
@@ -2196,9 +2569,10 @@ function bark(who, text, secs = 4.5) {
   const el = $('#bark'); el.dataset.voice = who === 'Leta' ? 'leta' : 'mnema'; el.textContent = who + ': ' + text;
   el.classList.remove('hidden'); clearTimeout(bark.t); bark.t = setTimeout(() => el.classList.add('hidden'), secs * 1000); Sound.blip();
 }
-async function showCard(title, sub = '', secs = 3.2) {
+async function showCard(title, sub = '', hold = 2.6) {
   const el = $('#card'); el.querySelector('b').textContent = title; el.querySelector('i').textContent = sub;
-  el.classList.remove('hidden'); await sleep(secs); el.classList.add('hidden');
+  el.classList.remove('hidden'); void el.offsetWidth; el.classList.add('show');   // fades in and out (CSS transition)
+  await sleep(1.4 + hold); el.classList.remove('show'); await sleep(1.5); el.classList.add('hidden');
 }
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 
@@ -2212,22 +2586,24 @@ function loadScene(id) {
   G.col = buildColGrid(G.scene.group.userData.col || []);
   scene.add(G.scene.group); applyEnv(def.env);
   if (G.scene.onEnter) G.scene.onEnter(Script);
+  buildPickups(); populate();
 }
 /** Actors are the characters in the world: the player, followers and scripted NPCs. */
-function spawnActor(id, x, z, heading = 0) {
+function spawnActor(id, x, z, heading = 0, model = id) {
   let a = G.actors[id];
   if (!a) {
-    const ch = CHARACTERS[id](); scene.add(ch.root);
+    const ch = CHARACTERS[model](); scene.add(ch.root);
     const shadow = new THREE.Mesh(new THREE.PlaneGeometry(.8, .8).rotateX(-Math.PI / 2), ps1Mat('shadow')); scene.add(shadow);
     a = G.actors[id] = { id, ch, shadow, x, z, heading, trail: [], seed: Math.random() * 20 };
   }
-  a.active = true; a.follow = false; a.going = false; a.look = null; a.stuck = 0; a.ch.anim.pose = null;
+  a.active = true; a.follow = false; a.going = false; a.look = null; a.stuck = 0; a.mon = null;
+  a.ch.anim.pose = null; a.ch.anim.clip = null; a.ch.anim.pk = {}; a.ch.root.rotation.x = 0;
   a.ch.root.visible = a.shadow.visible = true;
   placeActor(a, x, z, heading); return a;
 }
 function removeActor(id) {
   const a = G.actors[id]; if (!a) return;
-  a.active = false; a.follow = false; a.move = null; a.ch.root.visible = a.shadow.visible = false;
+  a.active = false; a.follow = false; a.move = null; a.mon = null; a.ch.root.visible = a.shadow.visible = false;
 }
 function placeActor(a, x, z, heading) {
   a.x = x; a.z = z; if (heading != null) a.heading = heading;
@@ -2308,11 +2684,22 @@ const Script = {
     const s = G.scene.spawns[spawn]; placePlayer(s.x, s.z, s.heading); syncParty();
     await fadeTo(1, .9);
   },
-  async startChapter(id) {
-    const ch = CHAPTERS[id]; G.chapter = id;
-    await Script.gotoScene(ch.scene, ch.spawn);
+  /** Chapter transition: fade out, crossfade the ambience, title card, autosave, slow fade in.
+      Health, items, flags and the hidden attachment counter simply carry over. */
+  async transition(id) {
+    const ch = CHAPTERS[id];
+    await fadeTo(0, 1.8);
+    G.chapter = id; resetPlayer(); loadScene(ch.scene);                    // applyEnv starts the ambience crossfade
+    const s = G.scene.spawns[ch.spawn]; placePlayer(s.x, s.z, s.heading); syncParty();
+    await showCard(ch.title.toUpperCase(), ch.subtitle);
+    SaveSystem.write(G);
+    await fadeTo(1, 3.2); toast('Autosaved.', 2.5);
     if (ch.onStart) await ch.onStart(Script);
   },
+  startChapter: id => Script.transition(id),
+  populate,
+  /** Autosave without asking. */
+  checkpoint(msg = 'Checkpoint.') { if (SaveSystem.write(G)) toast(msg, 2.2); },
 };
 /** Run a script with gameplay input suspended (state 'dialogue'). */
 async function runScript(fn) {
@@ -2327,16 +2714,24 @@ async function runScript(fn) {
 // ---- flow: title / new game / continue / pause
 async function showTitle() {
   Dialogue.hide(); Menu.closeAll(); setState('title'); unlockPointer(); G.camMode = 'title'; G.flags = {};
+  $('#death').classList.add('hidden'); resetPlayer(); syncLoadout(); G.hp = CFG.maxHp;
   if (G.sceneId !== 'city_entrance') loadScene('city_entrance'); else for (const k in G.actors) if (G.actors[k] !== G.player) removeActor(k);
   const s = G.scene.spawns.title; placePlayer(s.x, s.z, s.heading); G.player.ch.root.visible = true;
   Menu.open(titleMenu()); await fadeTo(1, 1.5);
 }
 async function enterGame(chapterId, save) {
-  Menu.closeAll(); setState('loading'); await fadeTo(0, .8);
-  const ch = CHAPTERS[chapterId]; G.chapter = chapterId;
-  if (save) { G.flags = { ...save.flags }; G.playtime = save.playtime || 0; loadScene(save.scene); placePlayer(save.x, save.z, save.heading); }
-  else { G.flags = {}; G.playtime = 0; loadScene(ch.scene); const s = G.scene.spawns[ch.spawn]; placePlayer(s.x, s.z, s.heading); }
-  syncParty(); G.camMode = 'game'; setState('play'); fadeTo(1, 1.4);
+  Menu.closeAll(); $('#death').classList.add('hidden'); setState('loading'); await fadeTo(0, .9);
+  const ch = CHAPTERS[chapterId]; G.chapter = chapterId; resetPlayer();
+  if (save) {
+    G.flags = { ...save.flags }; G.playtime = save.playtime || 0; G.hp = save.hp || CFG.maxHp; G.inv = { bandage: 0, flower: 0, medkit: 0, ...save.inv };
+    loadScene(save.scene); placePlayer(save.x, save.z, save.heading);
+  } else {
+    G.flags = {}; G.playtime = 0; G.hp = CFG.maxHp; G.inv = { bandage: 0, flower: 0, medkit: 0 };
+    loadScene(ch.scene); const s = G.scene.spawns[ch.spawn]; placePlayer(s.x, s.z, s.heading);
+  }
+  syncParty(); syncLoadout(); G.camMode = 'game';
+  if (!save) await showCard(ch.title.toUpperCase(), ch.subtitle, 1.8);
+  setState('play'); fadeTo(1, save ? 1.6 : 3);
   toast(document.body.classList.contains('touch') ? 'Stick: move    Drag: look    ACT: interact' : 'WASD: move    Mouse: look    Shift: sprint    E: interact', 8);
   if (!save && ch.onStart) runScript(ch.onStart);
 }
@@ -2376,13 +2771,32 @@ function turnToward(a, ang, rate, dt) { a.heading += angDiff(a.heading, ang) * M
 
 // ---- movement: player (camera-relative), scripted walks, follower AI
 function stepPlayer(a, dt) {
+  const A = G.act;
+  if (A.type) {                                                            // attacking, dodging, staggered or stunned: no free movement
+    const c = ACT[A.type]; A.t += dt;
+    if (A.type === 'dodge') { const k = c.speed * Math.max(0, 1 - A.t / c.dur) * dt; slideMove(a, A.dx * k, A.dz * k); }
+    else if (c.dmg && !A.hit && A.t >= c.a0) { A.hit = true; playerStrike(a, c); }
+    else if (A.type === 'stun') G.shake = Math.max(G.shake, .22);
+    if (A.t >= (A.dur || c.dur)) { if (A.type === 'stun') a.ch.anim.pose = null; A.type = null; }
+    return;
+  }
   let ix = Input.moveX, iy = Input.moveY, mag = Math.hypot(ix, iy);
   if (mag < .18) return;
   if (mag > 1) { ix /= mag; iy /= mag; mag = 1; }
   const c = G.cam, fx = Math.sin(c.yaw), fz = Math.cos(c.yaw), wx = -fz * ix + fx * iy, wz = fx * ix + fz * iy, l = Math.hypot(wx, wz) || 1;
   turnToward(a, Math.atan2(wx, wz), 12, dt);
   const speed = Input.run ? CFG.runSpeed : CFG.walkSpeed * clamp(mag / .85, .45, 1);
-  slideMove(a, wx / l * speed * dt, wz / l * speed * dt);
+  let dx = wx / l * speed * dt, dz = wz / l * speed * dt;
+  for (const e of monsters()) {                                            // walking into a monster shoves it, slowly
+    const ex = e.x - (a.x + dx), ez = e.z - (a.z + dz), d = Math.hypot(ex, ez) || .01;
+    if (d >= .62) continue;
+    slideMove(e, ex / d * speed * dt * .45, ez / d * speed * dt * .45); dx *= .4; dz *= .4;
+  }
+  slideMove(a, dx, dz);
+  for (const e of monsters()) {                                            // ...and one that cannot be pushed any further blocks the way
+    const ex = a.x - e.x, ez = a.z - e.z, d = Math.hypot(ex, ez) || .01;
+    if (d < .5) slideMove(a, ex / d * (.5 - d), ez / d * (.5 - d));
+  }
 }
 function stepScripted(a, dt) {
   const m = a.move, dx = m.x - a.x, dz = m.z - a.z, d = Math.hypot(dx, dz), step = m.speed * dt;
@@ -2435,7 +2849,8 @@ function updateActor(a, dt) {
   if (!a.active) return;
   const ox = a.x, oz = a.z;
   if (a.move) stepScripted(a, dt);
-  else if (G.state === 'play') { if (a === G.player) stepPlayer(a, dt); else if (a.follow) stepFollow(a, dt); }
+  else if (G.state === 'play') { if (a === G.player) stepPlayer(a, dt); else if (a.follow) stepFollow(a, dt); else if (a.mon) stepMonster(a, dt); }
+  if (!a.active) return;                                                   // a dead monster may have just been cleared away
   if (!a.move && a.faceTo != null) turnToward(a, a.faceTo, 7, dt);
   const v = a.warp || dt <= 0 ? 0 : Math.hypot(a.x - ox, a.z - oz) / dt; a.warp = false;
   a.vel += (v - a.vel) * Math.min(1, dt * 14);
@@ -2443,9 +2858,13 @@ function updateActor(a, dt) {
   ch.anim.speed = a.vel < .06 ? 0 : a.vel;
   ch.anim.look = t && t.active !== false ? t : null;
   ch.root.position.set(a.x, 0, a.z); ch.root.rotation.y = a.heading;
-  // companions that end up on top of the follow camera are hidden rather than clipped through
-  if (a !== G.player) ch.root.visible = !!G.cine || G.camMode !== 'game' || Math.hypot(camera.position.x - a.x, camera.position.z - a.z) > .8;
-  animateCharacter(ch, dt, G.time + a.seed);
+  if (a !== G.player) {   // hidden when lost in the fog, or when standing on top of the follow camera
+    const d = Math.hypot(camera.position.x - a.x, camera.position.z - a.z);
+    ch.root.visible = d < 48 && (!!G.cine || G.camMode !== 'game' || d > .8);
+  }
+  const fps = ch.style.fps;                                                // monsters animate at a low, stepped frame rate
+  if (!fps) animateCharacter(ch, dt, G.time + a.seed);
+  else { a.acc = (a.acc || 0) + dt; if (a.acc >= 1 / fps) { animateCharacter(ch, a.acc, G.time + a.seed); a.acc = 0; } }
   a.shadow.position.set(a.x, .03, a.z);
 }
 /** Leta's reflection in scene.mirror (a plane x = const): a mirrored copy that repeats her pose. */
@@ -2454,7 +2873,8 @@ function updateMirror() {
   R.group.visible = on; if (!on) return;
   R.group.position.x = 2 * m.x;
   R.ch.root.position.copy(p.ch.root.position); R.ch.root.rotation.copy(p.ch.root.rotation);
-  for (const k in p.ch.joints) { const s = p.ch.joints[k], d = R.ch.joints[k]; d.position.copy(s.position); d.rotation.copy(s.rotation); d.scale.copy(s.scale); }
+  for (const k in p.ch.joints) { const s = p.ch.joints[k], d = R.ch.joints[k]; d.position.copy(s.position); d.rotation.copy(s.rotation); d.scale.copy(s.scale); d.visible = s.visible; }
+  R.ch.joints.beam.visible = false;
 }
 
 // ---- camera collision: ray casts against the scene's solid triangles, bucketed in a coarse grid
@@ -2512,7 +2932,8 @@ function updateCamera(dt) {
   const want = clamp(t - .35, .25, CFG.camDist);
   c.cur = want < c.cur ? want : Math.min(want, c.cur + dt * 2.5);           // snap in, ease back out
   const px = ox - dx * c.cur, py = Math.max(.22, hy - dy * c.cur), pz = oz - dz * c.cur;
-  applyCamera([px, py, pz], [px + dx, py + dy, pz + dz], CFG.camFov);
+  const sk = G.shake * .09, jx = (Math.random() - .5) * sk, jy = (Math.random() - .5) * sk;   // screen shake
+  applyCamera([px + jx, py + jy, pz], [px + dx, py + dy, pz + dz], CFG.camFov);
   p.ch.root.visible = c.cur > .55;                                         // too close: hide her rather than look through her head
 }
 function setCine(c) {
@@ -2536,6 +2957,10 @@ function findTarget() {
     const d = Math.hypot(x - p.x, z - p.z);
     if (d < (it.r || 1.4) && d < bd) { bd = d; best = { it, x, z }; }
   }
+  for (const k of G.scene.pickups || []) {                                 // things lying around take priority when closer
+    const d = Math.hypot(k.x - p.x, k.z - p.z);
+    if (!G.flags['got.' + k.id] && d < 1.35 && d < bd + .4) { bd = d; best = { it: k.it, x: k.x, z: k.z }; }
+  }
   const m = G.actors.mnema;
   if (!best && m && m.active && m.follow) {
     const dx = m.x - p.x, dz = m.z - p.z;
@@ -2555,6 +2980,7 @@ function checkTriggers() {
     if (t.when && !t.when(Script)) continue;
     G.flags['trig.' + t.id] = true;
     if (t.bark) bark(t.bark[0], t.bark[1]);
+    if (t.checkpoint) Script.checkpoint();
     if (t.run) runScript(t.run);
     return;
   }
@@ -2577,39 +3003,47 @@ function updateHud() {
 let lastT = 0;
 function frame(ms) {
   requestAnimationFrame(frame);
-  const now = ms / 1000, dt = Math.min(.05, now - lastT || 0); lastT = now;
+  const now = ms / 1000, real = Math.min(.05, now - lastT || 0); lastT = now;
   if (G.fade !== G.fadeTarget) {
-    const step = G.fadeRate * dt; G.fade = Math.abs(G.fadeTarget - G.fade) <= step ? G.fadeTarget : G.fade + Math.sign(G.fadeTarget - G.fade) * step;
+    const step = G.fadeRate * real; G.fade = Math.abs(G.fadeTarget - G.fade) <= step ? G.fadeTarget : G.fade + Math.sign(G.fadeTarget - G.fade) * step;
     if (G.fade === G.fadeTarget && G.fadeDone) { const f = G.fadeDone; G.fadeDone = null; f(); }
   }
-  Sound.update(dt, now); pollGamepad();
-  if (G.state === 'viewer') return viewerFrame(dt, now);
+  Sound.update(real, now); pollGamepad();
+  if (G.state === 'viewer') return viewerFrame(real, now);
   if (!G.scene || !G.player) return;
-  if (G.state !== 'paused') {
+  G.hitstop = Math.max(0, G.hitstop - real);
+  const dt = G.hitstop > 0 ? 0 : real;                                     // hit-stop: the world holds still for a few frames
+  if (G.state !== 'paused' && G.state !== 'dead' && dt > 0) {
     G.time += dt;
-    if (G.state === 'play') { G.playtime += dt; G.player.look = G.target; }
+    if (G.state === 'play') {
+      G.playtime += dt; G.player.look = G.target; G.invuln -= dt;
+      if (G.staDelay > 0) G.staDelay -= dt; else G.sta = Math.min(CFG.maxSta, G.sta + 30 * dt);
+    }
     Dialogue.update(dt);
     for (const id in G.actors) updateActor(G.actors[id], dt);              // the player is always first
-    if (G.state === 'play') { checkTriggers(); G.target = findTarget(); }
-    updateMirror();
+    if (G.state === 'play') { checkTriggers(); G.target = G.act.type ? null : findTarget(); updateCompanion(); }
+    updateMirror(); updateLights(); updateFx(dt);
+    G.shake = Math.max(0, G.shake - dt * 2.2);
     if (G.camMode === 'title') titleCamera(); else if (G.cine) updateCine(); else updateCamera(dt);
     G.scene.update(dt, G.time, camera);
   }
   Input.mdx = Input.mdy = 0;
-  updateHud();
+  G.flash[3] = Math.max(0, G.flash[3] - real * 2.4);
+  updateHud(); drawHud(real);
   renderFrame(now, G.fade);
 }
 
-// ---- model viewer (dev aid): index.html?viewer  [&anim=idle|walk|run|cry|scared|laugh|reach|wave|cry_sit] [&view=front|turn] [&zoom]
+// ---- model viewer (dev aid): index.html?viewer  [&anim=idle|walk|run|light|heavy|dodge|hurt|death|cry|scared|...] [&view=front|side|turn] [&zoom]
 let viewerCast = [];
 function startViewer(params) {
   setState('viewer'); $('#boot').classList.add('hidden');
   applyEnv({ fog: [.6, .6, .62], fogNear: 60, fogFar: 120, fogMax: 0, ambient: [.74, .74, .76], sunDir: [.3, .8, .6], sunCol: [.36, .36, .36], lampPos: [0, 50, 0], lampCol: [0, 0, 0], lampR: 1 });
-  viewerCast = ['leta', 'mnema', 'hollow'].map((id, i) => { const c = CHARACTERS[id](); c.root.position.x = (i - 1) * .85; scene.add(c.root); console.info(c.name, 'triangles:', c.tris); return c; });
-  viewerCast.mode = params.get('anim') || 'cycle'; viewerCast.view = params.get('view') || 'turn'; viewerCast.zoom = params.has('zoom');
-  if (viewerCast.zoom) viewerCast.forEach((c, i) => { c.root.position.x = (i - 1) * .4; });
+  const zoom = params.has('zoom'), ids = zoom ? ['leta', 'mnema'] : Object.keys(CHARACTERS), gap = zoom ? .4 : .95;
+  viewerCast = ids.map((id, i) => { const c = CHARACTERS[id](); c.root.position.x = (i - (ids.length - 1) / 2) * gap; scene.add(c.root); console.info(c.name, 'triangles:', c.tris); return c; });
+  viewerCast[0].joints.weapon.visible = true;
+  viewerCast.mode = params.get('anim') || 'cycle'; viewerCast.view = params.get('view') || 'turn'; viewerCast.zoom = zoom;
   G.fade = G.fadeTarget = 1;
-  const keys = { Digit1: 'idle', Digit2: 'walk', Digit3: 'run', Digit4: 'wave', Digit5: 'laugh', Digit6: 'scared', Digit7: 'cry', Digit8: 'cry_sit', Digit9: 'reach' };
+  const keys = { Digit1: 'idle', Digit2: 'walk', Digit3: 'run', Digit4: 'light', Digit5: 'heavy', Digit6: 'dodge', Digit7: 'hurt', Digit8: 'death', Digit9: 'cry', Digit0: 'scared' };
   window.addEventListener('keydown', e => { if (keys[e.code]) viewerCast.mode = keys[e.code]; });
 }
 function viewerFrame(dt, now) {
@@ -2618,18 +3052,276 @@ function viewerFrame(dt, now) {
   for (const c of viewerCast) {
     c.anim.speed = mode === 'walk' ? CFG.walkSpeed : mode === 'run' ? CFG.runSpeed : 0;
     c.anim.pose = POSES[mode.split('_')[0]] ? mode : null;
+    if (CLIPS[mode] && (!c.anim.clip || (CLIPS[mode].hold && c.anim.clipT >= CLIPS[mode].dur && G.time % 3 < dt))) playClip(c, mode);   // loop the clip
+    else if (!CLIPS[mode]) c.anim.clip = null;
     c.root.rotation.y = viewerCast.view === 'front' ? 0 : viewerCast.view === 'side' ? 1.2 : G.time * .6;
     animateCharacter(c, dt, G.time);
   }
-  if (viewerCast.zoom) applyCamera([0, 1.5, 1.9], [0, 1.5, 0], 30); else applyCamera([0, .95, 4.6], [0, .9, 0], 30);
+  if (viewerCast.zoom) applyCamera([0, 1.5, 1.9], [0, 1.5, 0], 30); else applyCamera([0, 1.05, 10.5], [0, .95, 0], 30);
   renderFrame(now, 1);
+}
+
+/* ============================== 14b. COMBAT, MONSTERS, ITEMS, HUD ============================== */
+/* Leta's actions. a0 = the moment the swing connects; `inv` = invulnerable part of the dodge. */
+const ACT = {
+  light: { dur: .5, a0: .16, sta: 14, dmg: 1, range: 1.55, arc: 1, stop: .06, shake: .25 },
+  heavy: { dur: .95, a0: .5, sta: 30, dmg: 2.5, range: 1.8, arc: 1.2, stop: .13, shake: .6 },
+  dodge: { dur: .45, sta: 22, inv: .32, speed: 6.2 },
+  hurt: { dur: .4 }, stun: { dur: 1.6 }, dead: { dur: 1e9 },
+};
+/* Monster kinds. Passive ones only care about Mnema. The others only ever go for Leta. */
+const MON = {
+  wanderer: { model: 'hollow', passive: true, speed: .7 },
+  watcher:  { model: 'watcher', passive: true, speed: 0 },
+  crawler:  { model: 'crawler', hp: 2, speed: 3.9, dmg: 9, range: 1.5, wind: .35, cd: 1.1, clip: 'lunge', aggro: 11 },
+  brute:    { model: 'brute', hp: 8, speed: 1.15, dmg: 32, range: 1.9, wind: .75, cd: 1.6, clip: 'slam', aggro: 10, heavy: true },
+  screamer: { model: 'screamer', hp: 3, speed: 1.1, dmg: 5, range: 9, wind: .8, cd: 3.2, clip: 'scream', aggro: 13, stun: 1.7, keep: 6 },
+};
+const ITEMS = {
+  bandage: { name: 'Bandage', heal: 25, note: 'A roll of bandage, still in its paper.' },
+  flower: { name: 'Pale Flower', heal: 45, note: 'Pale flowers, growing out of the stone. They smell of nothing. I know what they are for. I do not know how I know.' },
+  medkit: { name: 'First Aid Kit', heal: 80, note: 'A first aid kit. The seal is unbroken.' },
+};
+/** Living monsters in the scene. */
+const monsters = () => Object.values(G.actors).filter(a => a.active && a.mon && a.mon.state !== 'dead');
+
+function spawnMonster(id, kind, x, z, heading = 0) {
+  const d = MON[kind], a = spawnActor(kind + ':' + id, x, z, heading, d.model);
+  a.mon = { id, kind, hp: d.hp || 0, state: 'idle', t: 0, kb: 0, kx: 0, kz: 0 };
+  return a;
+}
+/** Spawn the scene's monsters whose condition holds and that have not been killed. */
+function populate() {
+  for (const s of G.scene.monsters || []) {
+    const a = G.actors[s.kind + ':' + s.id];
+    if ((a && a.active) || G.flags['dead.' + s.id] || (s.when && !s.when(Script))) continue;
+    spawnMonster(s.id, s.kind, s.x, s.z, s.h || 0);
+  }
+}
+function stepMonster(a, dt) {
+  const m = a.mon, d = MON[m.kind], L = G.player;
+  m.t -= dt;
+  if (m.kb > 0) { m.kb -= dt; slideMove(a, m.kx * dt, m.kz * dt); m.kx *= .86; m.kz *= .86; }   // knocked back
+  if (m.state === 'dead') { if (m.t < -4) removeActor(a.id); return; }
+  for (const o of monsters()) {                                            // keep a little apart from each other
+    const ox = a.x - o.x, oz = a.z - o.z, od = Math.hypot(ox, oz);
+    if (o !== a && od < .8 && od > .01) slideMove(a, ox / od * dt * .8, oz / od * dt * .8);
+  }
+  if (d.passive) {                                                         // Wanderers drift to Mnema and reach; Watchers only turn their heads
+    const mn = G.actors.mnema, t = mn && mn.active ? mn : null;
+    a.look = t;
+    if (m.state === 'hurt') { if (m.t <= 0) m.state = 'idle'; return; }
+    if (!t || !d.speed) return;
+    const dx = t.x - a.x, dz = t.z - a.z, dist = Math.hypot(dx, dz);
+    if (dist > 30) return;
+    turnToward(a, Math.atan2(dx, dz), 2.5, dt);
+    if (dist > 1.5) { a.ch.anim.pose = null; slideMove(a, dx / dist * d.speed * dt, dz / dist * d.speed * dt); } else a.ch.anim.pose = 'reach';
+    return;
+  }
+  const dx = L.x - a.x, dz = L.z - a.z, dist = Math.hypot(dx, dz) || .01, ang = Math.atan2(dx, dz), alive = G.act.type !== 'dead';
+  if (m.state === 'idle') { if (alive && dist < d.aggro) { m.state = 'chase'; m.t = .4; a.look = 'leta'; Sound.growl(m.kind); } return; }
+  if (m.state === 'hurt' || m.state === 'recover') { if (m.t <= 0) m.state = 'chase'; return; }
+  if (m.state === 'wind') {
+    if (m.t > d.wind * .4) turnToward(a, ang, 5, dt);                      // commits to a direction part-way through the wind-up
+    if (m.t <= 0) { monsterStrike(a, d); m.state = 'recover'; m.t = d.cd; }
+    return;
+  }
+  if (!alive) return;
+  turnToward(a, ang, 7, dt);
+  const far = dist > d.range * (d.keep ? .8 : .7);
+  if (far) slideMove(a, dx / dist * d.speed * dt, dz / dist * d.speed * dt);
+  else if (d.keep && dist < d.keep - 2.5) slideMove(a, -dx / dist * d.speed * dt, -dz / dist * d.speed * dt);   // Screamers keep their distance
+  if (!far && m.t <= 0) { m.state = 'wind'; m.t = d.wind; playClip(a.ch, d.clip); }
+}
+function monsterStrike(a, d) {
+  const L = G.player, dx = L.x - a.x, dz = L.z - a.z, dist = Math.hypot(dx, dz), facing = Math.abs(angDiff(a.heading, Math.atan2(dx, dz)));
+  if (d.stun) {                                                            // Screamer: a cone of sound that stuns at range
+    Sound.scream(); addFx(a.x, 1.6, a.z, .6, 8, .5); G.shake = Math.max(G.shake, .3);
+    if (dist < d.range && facing < .7) damagePlayer(d.dmg, a, d.stun);
+    return;
+  }
+  Sound.swing(d.heavy);
+  if (d.heavy) { G.shake = Math.max(G.shake, .35); addFx(a.x + Math.sin(a.heading) * 1.3, .3, a.z + Math.cos(a.heading) * 1.3, .5, 3, .3); }
+  if (dist < d.range + .3 && facing < 1) damagePlayer(d.dmg, a);
+}
+function damageMonster(e, c, nx, nz) {
+  const m = e.mon, d = MON[m.kind], k = (c.dmg > 1 ? 7 : 4) / (d.heavy ? 3 : 1);
+  addFx(e.x - nx * .3, 1.1 * e.ch.root.scale.y, e.z - nz * .3, .25, 1.2, .16);
+  m.kb = .25; m.kx = nx * k; m.kz = nz * k;
+  if (d.passive) { m.state = 'hurt'; m.t = .5; playClip(e.ch, 'hurt'); return; }   // they stagger and come back
+  m.hp -= c.dmg;
+  if (m.hp <= 0) { m.state = 'dead'; m.t = 0; e.look = null; playClip(e.ch, 'death'); G.flags['dead.' + m.id] = true; Sound.growl('die'); return; }
+  if (!d.heavy || c.dmg > 1) { m.state = 'hurt'; m.t = .4; playClip(e.ch, 'hurt'); } else if (m.state === 'idle') m.state = 'chase';   // a Brute only flinches at a heavy blow
+}
+
+// ---- Leta's side of it
+/** Start a light or heavy swing, or a dodge, if she is free to act and has the stamina. */
+function playerAct(type) {
+  const p = G.player, c = ACT[type];
+  if (G.state !== 'play' || G.act.type || G.busy) return;
+  if (type !== 'dodge' && !G.flags['has.plank']) return;
+  if (G.sta < c.sta * .6) { Sound.ui('back'); $('#sta').classList.add('low'); setTimeout(() => $('#sta').classList.remove('low'), 300); return; }
+  G.sta = Math.max(0, G.sta - c.sta); G.staDelay = .9; G.act = { type, t: 0, hit: false };
+  playClip(p.ch, type); Sound.swing(type === 'heavy');
+  if (type === 'dodge') {                                                  // toward the held direction, or a step back
+    const cy = G.cam.yaw, ix = Input.moveX, iy = Input.moveY;
+    let wx = -Math.cos(cy) * ix + Math.sin(cy) * iy, wz = Math.sin(cy) * ix + Math.cos(cy) * iy; const l = Math.hypot(wx, wz);
+    if (l < .2) { wx = -Math.sin(p.heading); wz = -Math.cos(p.heading); } else { wx /= l; wz /= l; p.heading = Math.atan2(wx, wz); }
+    G.act.dx = wx; G.act.dz = wz; return;
+  }
+  let best = null, bd = 2.8;                                               // swing at the nearest thing in front of her, else where the camera looks
+  for (const e of monsters()) {
+    const dx = e.x - p.x, dz = e.z - p.z, d = Math.hypot(dx, dz), ang = Math.atan2(dx, dz);
+    if (d < bd && (Math.abs(angDiff(p.heading, ang)) < 1.5 || Math.abs(angDiff(G.cam.yaw, ang)) < 1)) { bd = d; best = ang; }
+  }
+  p.heading = best ?? G.cam.yaw;
+}
+function playerStrike(p, c) {
+  let hit = false;
+  for (const e of monsters()) {
+    const dx = e.x - p.x, dz = e.z - p.z, dist = Math.hypot(dx, dz) || .01;
+    if (dist > c.range + .3 || Math.abs(angDiff(p.heading, Math.atan2(dx, dz))) > c.arc) continue;
+    hit = true; damageMonster(e, c, dx / dist, dz / dist);
+  }
+  if (!hit) return;
+  G.hitstop = c.stop; G.shake = Math.max(G.shake, c.shake); G.flash = [1, 1, .94, c.dmg > 1 ? .3 : .17]; Sound.hit(c.dmg > 1);
+}
+function damagePlayer(dmg, from, stun = 0) {
+  const A = G.act, p = G.player;
+  if (G.state !== 'play' || A.type === 'dead' || G.invuln > 0 || (A.type === 'dodge' && A.t < ACT.dodge.inv)) return;
+  G.hp = Math.max(0, G.hp - dmg); G.invuln = .7; G.shake = Math.max(G.shake, .4 + dmg / 40); G.flash = [.6, .04, .04, .45]; Sound.hurt();
+  if (G.hp <= 0) return playerDied();
+  if (from) { const dx = p.x - from.x, dz = p.z - from.z, d = Math.hypot(dx, dz) || 1; slideMove(p, dx / d * .35, dz / d * .35); }
+  G.act = stun ? { type: 'stun', t: 0, dur: stun } : { type: 'hurt', t: 0 };
+  p.ch.anim.pose = stun ? 'stun' : null; if (!stun) playClip(p.ch, 'hurt');
+}
+async function playerDied() {
+  G.act = { type: 'dead', t: 0 }; G.player.ch.anim.pose = null; playClip(G.player.ch, 'death'); Sound.death();
+  setState('dying'); unlockPointer();
+  await sleep(1.9); await fadeTo(.22, 1.4);
+  if (G.state !== 'dying') return;
+  setState('dead'); $('#death').classList.remove('hidden'); Menu.open(deathMenu());
+}
+/** Back to the last checkpoint (or the very beginning if there is none). */
+function retry() { Menu.closeAll(); if (SaveSystem.exists()) continueGame(); else startNewGame(); }
+function resetPlayer() {
+  const pc = G.player.ch; pc.anim.clip = null; pc.anim.pose = null; pc.anim.pk = {}; pc.root.rotation.x = 0;
+  Object.assign(G, { act: { type: null, t: 0 }, sta: CFG.maxSta, staDelay: 0, invuln: 0, hitstop: 0, shake: 0 });
+}
+/** Show what she is carrying: the plank in her hand, the attack button on touch screens. */
+function syncLoadout() {
+  const has = !!G.flags['has.plank'];
+  G.player.ch.joints.weapon.visible = has; $('#btnAtk').classList.toggle('hidden', !has);
+}
+/** Mnema cannot be hurt and nothing goes for her, but she is frightened all the same. */
+function updateCompanion() {
+  const m = G.actors.mnema; if (!m || !m.active || !m.follow) return;
+  const threat = monsters().some(e => !MON[e.mon.kind].passive && e.mon.state !== 'idle' && Math.hypot(e.x - m.x, e.z - m.z) < 12);
+  m.ch.anim.pose = threat && m.vel < .3 ? 'scared' : null;
+  if (threat && !G.flags['bark.fight']) { G.flags['bark.fight'] = true; bark('Mnema', 'Leta—! Leta, look out!'); }
+}
+
+// ---- items, pickups, inventory
+const pickupMesh = (data, tex) => new THREE.Mesh(toGeometry(data), ps1Mat(tex));
+const PICKUP_MESH = {
+  bandage: () => pickupMesh(loftData([{ y: 0, r: .07 }, { y: .1, r: .07 }], 8, { capEnd: true }), 'bandage'),
+  medkit: () => pickupMesh(boxData(.36, .2, .24, { fit: true }), 'medkit'),
+  flower: () => pickupMesh(appendData(quadData([-.3, 0, 0], [.3, 0, 0], [.3, .55, 0], [-.3, .55, 0]), quadData([0, 0, .3], [0, 0, -.3], [0, .55, -.3], [0, .55, .3])), 'paleflower'),
+  plank: () => pickupMesh(boxData(.1, 1, .034, { uvm: [.5, 1] }), 'wood'),
+};
+/** Create the scene's pickups (scene.pickups: [{ id, type, x, z, y?, ry?, rz? }]); taken ones stay hidden. */
+function buildPickups() {
+  for (const p of G.scene.pickups || []) {
+    p.mesh = PICKUP_MESH[p.type](); p.mesh.position.set(p.x, p.y || 0, p.z); p.mesh.rotation.set(0, p.ry || 0, p.rz || 0);
+    p.mesh.visible = !G.flags['got.' + p.id]; G.scene.group.add(p.mesh);
+    p.it = { id: p.id, verb: 'Take', h: (p.y || 0) + .6, run: g => takePickup(g, p) };
+  }
+}
+async function takePickup(g, p) {
+  const touch = document.body.classList.contains('touch');
+  G.flags['got.' + p.id] = true; p.mesh.visible = false; Sound.pickup();
+  if (p.type === 'plank') {
+    G.flags['has.plank'] = true; syncLoadout();
+    await g.lines(['A plank, torn off a shutter. One end is split to a point.', 'I have no use for it. I take it anyway.']);
+    return g.system(touch ? 'ATK: swing (hold for a heavy swing).  DODGE: dodge.' : 'J / left click: swing.   K / right click: heavy swing.   SPACE: dodge.');
+  }
+  G.inv[p.type]++; const it = ITEMS[p.type];
+  if (!g.flag('seen.item.' + p.type)) { g.setFlag('seen.item.' + p.type); await g.say(it.note); }
+  await g.system('Took: ' + it.name + '.   (' + (touch ? 'ITEM' : 'I') + ': inventory)');
+}
+function useItem(k) {
+  if (!G.inv[k]) return;
+  if (G.hp >= CFG.maxHp) { toast('No need for that now.'); return; }
+  G.inv[k]--; G.hp = Math.min(CFG.maxHp, G.hp + ITEMS[k].heal); Sound.heal(); toast(ITEMS[k].name + ' used.');
+}
+const hpState = () => G.hp > 60 ? ['FINE', '#72c98e', 1.1] : G.hp > 30 ? ['CAUTION', '#d6bf58', 1.5] : G.hp > 0 ? ['DANGER', '#d2564a', 2.2] : ['', '#d2564a', 0];
+const inventoryMenu = nested => ({
+  title: 'INVENTORY', panel: true, onBack() { if (!nested) { setState('play'); lockPointer(); } },
+  items: [
+    ...Object.keys(ITEMS).map(k => ({ label: ITEMS[k].name, value: () => 'x' + G.inv[k], disabled: () => !G.inv[k], select() { useItem(k); } })),
+    { label: 'Close', select() { Menu.back(); } },
+  ],
+  help: () => 'Condition: ' + hpState()[0] + '.   ' + (G.flags['has.plank'] ? 'Weapon: wooden plank.' : 'No weapon.') + '   Select an item to use it.',
+});
+const deathMenu = () => ({ items: [{ label: 'Retry', select() { retry(); } }, { label: 'Quit to Title', select() { quitToTitle(); } }] });
+function openInventory() { if (G.state !== 'play') return; Sound.ui('ok'); setState('paused'); unlockPointer(); Menu.open(inventoryMenu()); }
+
+// ---- lights, effects, HUD
+/** Lamps of a scene: env.lamps, or the single classic lamp. `steady` lamps do not flicker. */
+function envLamps(env) { return env.lamps || [{ pos: env.lampPos, col: env.lampCol, r: env.lampR }]; }
+/** Leta's flashlight, and the street lamp that lights the characters (whichever is nearest to her). */
+function updateLights() {
+  const p = G.player, sy = Math.sin(p.heading), cy = Math.cos(p.heading), on = G.light && G.camMode === 'game', k = on ? (G.scene.def.env.flash ?? .5) : 0;
+  SHARED.uFlashPos.value.set(p.x + sy * .2, 1.28, p.z + cy * .2); SHARED.uFlashDir.value.set(sy * .985, -.17, cy * .985);
+  SHARED.uFlashCol.value.set(1.05 * k, .98 * k, .8 * k); p.ch.joints.beam.visible = on;
+  let best = null, bd = 1e9;
+  for (const L of envLamps(G.scene.def.env)) { const d = Math.hypot(L.pos[0] - p.x, L.pos[2] - p.z); if (d < bd) { bd = d; best = L; } }
+  SHARED.uLampPos.value.set(...best.pos); SHARED.uLampCol.value.set(...best.col); SHARED.uLampR.value = best.r;
+}
+/** A short additive flash in the world (hit sparks, shock rings). */
+function addFx(x, y, z, s0, s1, dur) {
+  let f = G.fx.find(f => f.t >= f.dur);
+  if (!f) { f = { mesh: new THREE.Mesh(new THREE.PlaneGeometry(1, 1), ps1Mat('spark')) }; scene.add(f.mesh); G.fx.push(f); }
+  Object.assign(f, { t: 0, dur, s0, s1 }); f.mesh.position.set(x, y, z); f.mesh.visible = true;
+}
+function updateFx(dt) {
+  for (const f of G.fx) {
+    if (f.t >= f.dur) continue;
+    f.t += dt; f.mesh.visible = f.t < f.dur; f.mesh.scale.setScalar(lerp(f.s0, f.s1, f.t / f.dur)); f.mesh.quaternion.copy(camera.quaternion);
+  }
+}
+let ecgX = 0, ecgPh = 0, ecgY0 = 12;
+/** Health as a heart trace (Fine / Caution / Danger) and the stamina bar under it. */
+function drawHud(dt) {
+  const hud = $('#hud'), show = G.camMode === 'game' && !G.cine && G.fade > .5 && (G.state === 'play' || G.state === 'dialogue' || G.state === 'dying');
+  hud.classList.toggle('hidden', !show); if (!show) return;
+  const st = hpState(), c = $('#ecg'), ctx = c.getContext('2d'), W = c.width, H = c.height, lab = $('#hpLabel');
+  for (let n = Math.max(1, Math.round(dt * 44)); n > 0; n--) {             // sweep, like a monitor; the pulse quickens as she weakens
+    const p = ecgPh = (ecgPh + st[2] / 44) % 1;
+    const wave = p < .06 ? Math.sin(p / .06 * Math.PI) * 2 : p > .12 && p < .15 ? -2 : p >= .15 && p < .2 ? H * .5 : p >= .2 && p < .24 ? -4 : p > .34 && p < .46 ? Math.sin((p - .34) / .12 * Math.PI) * 3 : 0;
+    const y = Math.round(H * .64 - (st[2] ? wave : 0));
+    ctx.fillStyle = '#060b10'; ctx.fillRect(ecgX, 0, 1, H); ctx.fillRect((ecgX + 1) % W, 0, 4, H);
+    ctx.fillStyle = st[1]; ctx.fillRect(ecgX, Math.min(y, ecgY0), 1, Math.abs(y - ecgY0) + 1);
+    ecgY0 = y; ecgX = (ecgX + 1) % W;
+  }
+  if (lab.textContent !== st[0]) { lab.textContent = st[0]; lab.style.color = st[1]; }
+  $('#sta i').style.width = (G.sta / CFG.maxSta * 100) + '%';
+}
+/** Mouse buttons and the extra touch buttons. */
+function initCombatInput() {
+  window.addEventListener('mousedown', e => { if (G.state === 'play' && document.pointerLockElement && e.button !== 1) playerAct(e.button === 2 ? 'heavy' : 'light'); });
+  const atk = $('#btnAtk'); let t0 = 0;
+  atk.addEventListener('pointerdown', e => { e.preventDefault(); Sound.unlock(); t0 = performance.now(); });
+  atk.addEventListener('pointerup', e => { e.preventDefault(); playerAct(performance.now() - t0 > 320 ? 'heavy' : 'light'); });   // hold = heavy
+  $('#btnDodge').addEventListener('pointerdown', e => { e.preventDefault(); Sound.unlock(); onButton('dodge'); });
+  $('#btnInv').addEventListener('pointerdown', e => { e.preventDefault(); Sound.unlock(); onButton('inv'); });
 }
 
 /* ============================== 15. BOOT ============================== */
 function boot() {
   Settings.load();
-  buildWorldTextures(); buildCharacterTextures(); buildChapter1Textures();
-  initRenderer(); layout(); initInput();
+  buildWorldTextures(); buildCharacterTextures(); buildChapter1Textures(); buildUpdateTextures();
+  initRenderer(); layout(); initInput(); initCombatInput();
   window.addEventListener('resize', layout); window.addEventListener('orientationchange', () => setTimeout(layout, 200));
   const params = new URLSearchParams(location.search);
   if (params.has('viewer')) startViewer(params);
@@ -2642,7 +3334,7 @@ function boot() {
     $('#boot').classList.add('hidden');
     showTitle();
   }
-  window.ASPHODEL = { G, THREE, SCENES, CHAPTERS, CHARACTERS, Settings, SaveSystem, Script, Input, Dialogue, camera, scene, canStand, registerScene, registerChapter };   // console / test hook
+  window.ASPHODEL = { G, THREE, SCENES, CHAPTERS, CHARACTERS, Settings, SaveSystem, Script, Input, Dialogue, camera, scene, canStand, registerScene, registerChapter, playerAct, damagePlayer, spawnMonster, monsters, MON };   // console / test hook
   requestAnimationFrame(frame);
 }
 try { boot(); } catch (e) { console.error(e); $('#boot').classList.remove('hidden'); $('#boot').textContent = 'Could not start: ' + e.message; }
