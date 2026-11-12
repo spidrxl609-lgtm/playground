@@ -138,6 +138,22 @@
   body[data-state="title"] .gbtn, body[data-state="paused"] .gbtn, body[data-state="dead"] .gbtn,
   body[data-state="dead"] #stick, body[data-state="dead"] #btnA, body[data-state="dead"] #btnMenu { display: none; }
   #toast { top: 15%; }
+
+  /* ---- inventory: item slots ---- */
+  #inv { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 12.9em; padding: .5em .7em .6em;
+    background: linear-gradient(rgba(10,16,26,.93), rgba(4,8,14,.93)); border: max(var(--u), 1px) solid #8fa0ad;
+    box-shadow: inset 0 0 0 max(var(--u), 1px) #1b2530, 0 0 0 max(var(--u), 1px) #000; }
+  .inv-grid { display: grid; grid-template-columns: repeat(4, 2.6em); gap: .25em; justify-content: center; }
+  .slot { position: relative; width: 2.6em; height: 2.6em; background: rgba(120,150,170,.08); border: max(var(--u), 1px) solid #3a4650; cursor: pointer; }
+  .slot.sel { border-color: #f2f6f8; background: rgba(120,150,170,.28); }
+  .slot img { position: absolute; left: 14%; top: 14%; width: 72%; height: 72%; image-rendering: pixelated; image-rendering: crisp-edges; }
+  .slot i { position: absolute; right: .2em; bottom: 0; font-style: normal; font-size: .7em; color: #d6c890; }
+  .inv-info { margin-top: .4em; min-height: 2.4em; font-size: .85em; color: #a9c0cf; white-space: normal; }
+  .inv-info b { display: block; font-weight: normal; color: #f2f6f8; }
+  .inv-row { display: flex; justify-content: center; gap: 1.2em; margin-top: .25em; }
+  .inv-btn { padding: 0 .8em; color: #dbe9f4; border: max(var(--u), 1px) solid #55636e; cursor: pointer; }
+  .inv-btn.dis { color: #414b55; border-color: #2a333b; }
+  #inv .menu-help { margin: .4em 0 0; }
 </style>
 </head>
 <body data-state="boot">
@@ -155,6 +171,13 @@
     <div id="card" class="hidden"><b></b><i></i></div>
     <div id="hud" class="hidden"><canvas id="ecg" width="66" height="20"></canvas><div id="hpLabel"></div><div id="sta"><i></i></div></div>
     <div id="death" class="hidden">YOU DIED</div>
+    <div id="inv" class="hidden">
+      <div class="menu-title">INVENTORY</div>
+      <div class="inv-grid"></div>
+      <div class="inv-info"><b></b><span></span></div>
+      <div class="inv-row"><div id="invUse" class="inv-btn">Use</div><div id="invClose" class="inv-btn">Close</div></div>
+      <div class="menu-help"></div>
+    </div>
     <div id="dialogue" class="hidden">
       <div class="dlg-name hidden"></div>
       <div class="dlg-body inner"><span class="dlg-shown"></span><span class="dlg-rest"></span></div>
@@ -209,7 +232,7 @@ THREE.ColorManagement.enabled = false;          // colours are authored display-
 /* ============================== 1. CONFIG / UTILS ============================== */
 const CFG = {
   lowH: 360, uiH: 240, aspectMin: 4 / 3, aspectMax: 16 / 9,
-  walkSpeed: 1.55, runSpeed: 3.5, playerRadius: 0.28, maxHp: 100, maxSta: 100,
+  walkSpeed: 1.55, runSpeed: 3.5, playerRadius: 0.28, maxHp: 100, maxSta: 100, slots: 8,
   camDist: 2.6, camHeight: 1.42, camShoulder: .4, camFov: 55,      // over-the-shoulder follow camera
   saveKey: 'asphodel.save.v1', settingsKey: 'asphodel.settings.v1',
 };
@@ -252,7 +275,7 @@ const SaveSystem = {
   /** Snapshot of everything a chapter needs to resume: where, facing, flags, playtime. */
   write(G) {
     const d = { version: 1, chapter: G.chapter, scene: G.sceneId, x: G.player.x, z: G.player.z, heading: G.player.heading,
-      flags: { ...G.flags }, hp: Math.round(G.hp), inv: { ...G.inv }, playtime: Math.round(G.playtime), savedAt: Date.now() };
+      flags: { ...G.flags }, hp: Math.round(G.hp), slots: G.slots.map(s => s && { ...s }), playtime: Math.round(G.playtime), savedAt: Date.now() };
     try { localStorage.setItem(CFG.saveKey, JSON.stringify(d)); return true; } catch (e) { return false; }
   },
   clear() { try { localStorage.removeItem(CFG.saveKey); } catch (e) { /* storage unavailable */ } },
@@ -1164,8 +1187,9 @@ function buildLeta() {
         under: [{ y: .085, rx: .106, rz: .112, v: 1 }, { y: -.035, rx: .111, rz: .114, v: .42 }, { y: -.11, rx: .1, rz: .098, v: 0 }],
         fringe: [[-50, .1, .03], [-30, .082, .034], [-12, .078, .034], [2, .125, .03], [18, .08, .034], [36, .084, .032], [52, .1, .03]],
         locks: [68, 96, 124, 152, 180, 208, 236, 264, 292].map((a, i) => [a, .19 + (i % 3) * .014, .042, -.02]) });
-      // a pocket light on her chest, its beam, and the plank (hidden until she picks it up)
-      k.part(k.j.torso, xform(boxData(.04, .07, .03, { faces: ['px', 'nx', 'py', 'ny', 'pz'] }), M(.07, .24, .095)), 'glow');
+      // the flashlight clipped to her chest, its beam, and the plank: all hidden until she finds them
+      k.j.lamp = k.grp(k.j.torso, 0, 0, 0); k.j.lamp.visible = false;
+      k.part(k.j.lamp, xform(boxData(.04, .07, .03, { faces: ['px', 'nx', 'py', 'ny', 'pz'] }), M(.07, .24, .095)), 'glow');
       k.j.beam = k.grp(k.j.torso, .07, .28, .14); k.j.beam.rotation.x = Math.PI / 2 + .17; k.j.beam.visible = false;
       k.part(k.j.beam, loftData([{ y: .05, r: .03, v: 1 }, { y: 2.5, r: .75, v: .5 }, { y: 5, r: 1.6, v: 0 }], 10), 'beam');
       k.j.weapon = k.grp(k.j.handR, 0, -.05, .012); k.j.weapon.rotation.x = 1.9; k.j.weapon.visible = false;
@@ -1863,7 +1887,7 @@ registerScene('main_street', {
       ],
       pickups: [
         { id: 'plank', type: 'plank', x: -3.85, z: 27.45, rz: .3 }, { id: 'b1', type: 'bandage', x: 4.75, z: 16.3 }, { id: 'f1', type: 'flower', x: -9.2, z: 3.2 },
-        { id: 'b2', type: 'bandage', x: 20.5, z: -40 }, { id: 'f2', type: 'flower', x: 27.5, z: -40 }, { id: 'm1', type: 'medkit', x: 38.5, z: -35.05, ry: .4 }, { id: 'b3', type: 'bandage', x: 57.5, z: -40 },
+        { id: 'b2', type: 'bandage', x: 20.5, z: -40 }, { id: 'f2', type: 'flower', x: 27.5, z: -40 }, { id: 'm1', type: 'medkit', x: 38.5, z: -35.05, ry: .4 }, { id: 'light', type: 'flashlight', x: 37.3, z: -37.3, ry: 1.2 }, { id: 'b3', type: 'bandage', x: 57.5, z: -40 },
       ],
       spawns: { start: { x: 4.9, z: 32.2, heading: Math.PI } },
       surfaceAt: surf,
@@ -2196,7 +2220,7 @@ const TALK_MNEMA = { id: 'talk', verb: 'Talk', h: 1.8, run: async g => {
 registerChapter('chapter2', {
   title: 'Chapter 2', subtitle: 'The Chapel Road', scene: 'chapel_road', spawn: 'start',
   async onStart(g) {
-    await g.talk(['The lane ends where the lamps do.', 'I have had my light on the whole way. I notice it now.',
+    await g.talk(['The lane ends where the lamps do.', g.flag('has.light') ? 'The flashlight shows the gravel and not much else.' : 'I have nothing to see by. I walk anyway.',
       ...(g.inParty('mnema') ? [['M', 'It got dark. Did it get dark, or did we walk into it?'], ['M', "...Don't answer that. Walk in front. Please."]] : [])]);
   },
 });
@@ -2379,7 +2403,7 @@ function pollGamepad() {
   let gp = null; for (const g of list) if (g && g.connected) { gp = g; break; }
   if (!gp) { if (P.on) { P.mx = P.my = P.lx = P.ly = 0; P.run = false; P.on = false; } return; }
   P.on = true;
-  const dz = v => Math.abs(v || 0) < .2 ? 0 : v, down = i => !!(gp.buttons[i] && gp.buttons[i].pressed), ui = Dialogue.active || !!Menu.current;
+  const dz = v => Math.abs(v || 0) < .2 ? 0 : v, down = i => !!(gp.buttons[i] && gp.buttons[i].pressed), ui = Dialogue.active || !!Menu.current || Inventory.active;
   P.mx = dz(gp.axes[0]); P.my = -dz(gp.axes[1]); P.lx = dz(gp.axes[2]) * 1.3; P.ly = dz(gp.axes[3]) * 1.3;
   P.run = down(7) || down(10);
   const edge = (id, on, btn) => { if (on && !P.was[id]) onButton(btn); P.was[id] = on; };
@@ -2388,17 +2412,18 @@ function pollGamepad() {
   edge('u', down(12) || gp.axes[1] < -.6, 'up'); edge('d', down(13) || gp.axes[1] > .6, 'down');
   edge('l', down(14) || gp.axes[0] < -.6, 'left'); edge('r', down(15) || gp.axes[0] > .6, 'right');
 }
-/** Route a logical button to whoever has focus: dialogue > menu > gameplay. */
+/** Route a logical button to whoever has focus: dialogue > inventory > menu > gameplay. */
 function onButton(b) {
-  if (b === 'dodge' && (Dialogue.active || Menu.current)) b = 'confirm';   // Space advances text and confirms in menus
+  if (b === 'dodge' && (Dialogue.active || Menu.current || Inventory.active)) b = 'confirm';   // Space advances text and confirms in menus
   if (b === 'inv' && Menu.current) b = 'cancel';
   if (Dialogue.active) return Dialogue.onButton(b);
+  if (Inventory.active) return Inventory.onButton(b);
   if (Menu.current) return Menu.onButton(b);
   if (G.state !== 'play') return;
   if (b === 'confirm') tryInteract();
   else if (b === 'light' || b === 'heavy' || b === 'dodge') playerAct(b);
   else if (b === 'inv') openInventory();
-  else if (b === 'flash') { G.light = !G.light; Sound.ui('move'); }
+  else if (b === 'flash') { if (G.flags['has.light']) { G.light = !G.light; Sound.ui('move'); } }
   else if (b === 'cancel' || b === 'pause') openPause();
 }
 
@@ -2485,6 +2510,7 @@ const Menu = {
     else if (b === 'cancel' || b === 'pause') this.back();
   },
   render() {
+    if (Inventory.active) return;                                          // the inventory screen is covering the menu
     const el = $('#menu'), e = this.current;
     el.classList.toggle('hidden', !e); $('#title').classList.toggle('hidden', !(e && e.def.logo)); $('#footer').classList.toggle('hidden', !(e && e.def.logo));
     if (!e) return;
@@ -2532,7 +2558,7 @@ const pauseMenu = () => ({
   title: 'PAUSED', panel: true, onBack() { setState('play'); lockPointer(); },
   items: [
     { label: 'Resume', select() { Menu.back(); } },
-    { label: 'Inventory', select() { Menu.open(inventoryMenu(true)); } },
+    { label: 'Inventory', select() { Inventory.open(true); } },
     { label: 'Settings', select() { Menu.open(settingsMenu()); } },
     { label: 'Quit to Title', select() { quitToTitle(); } },
   ],
@@ -2559,7 +2585,7 @@ const G = {
   state: 'boot', time: 0, playtime: 0, flags: {}, chapter: null, sceneId: null, scene: null, col: null,
   actors: {}, player: null, mirror: null, fade: 0, fadeTarget: 0, fadeRate: 1, fadeDone: null, busy: false,
   camMode: 'title', cam: { yaw: Math.PI, pitch: .2, cur: CFG.camDist, x: 0, z: 0 }, cine: null, target: null,
-  hp: 100, sta: 100, staDelay: 0, inv: { bandage: 0, flower: 0, medkit: 0 }, act: { type: null, t: 0 },   // health, stamina, items, current action
+  hp: 100, sta: 100, staDelay: 0, slots: Array(CFG.slots).fill(null), act: { type: null, t: 0 },   // health, stamina, item slots, current action
   invuln: 0, hitstop: 0, shake: 0, flash: [0, 0, 0, 0], light: true, fx: [],
 };
 function setState(s) { G.state = s; document.body.dataset.state = s; }
@@ -2724,10 +2750,10 @@ async function enterGame(chapterId, save) {
   Menu.closeAll(); $('#death').classList.add('hidden'); setState('loading'); await fadeTo(0, .9);
   const ch = CHAPTERS[chapterId]; G.chapter = chapterId; resetPlayer();
   if (save) {
-    G.flags = { ...save.flags }; G.playtime = save.playtime || 0; G.hp = save.hp || CFG.maxHp; G.inv = { bandage: 0, flower: 0, medkit: 0, ...save.inv };
+    G.flags = { ...save.flags }; G.playtime = save.playtime || 0; G.hp = save.hp || CFG.maxHp; restoreSlots(save);
     loadScene(save.scene); placePlayer(save.x, save.z, save.heading);
   } else {
-    G.flags = {}; G.playtime = 0; G.hp = CFG.maxHp; G.inv = { bandage: 0, flower: 0, medkit: 0 };
+    G.flags = {}; G.playtime = 0; G.hp = CFG.maxHp; restoreSlots(null);
     loadScene(ch.scene); const s = G.scene.spawns[ch.spawn]; placePlayer(s.x, s.z, s.heading);
   }
   syncParty(); syncLoadout(); G.camMode = 'game';
@@ -3078,10 +3104,13 @@ const MON = {
   brute:    { model: 'brute', hp: 8, speed: 1.15, dmg: 32, range: 1.9, wind: .75, cd: 1.6, clip: 'slam', aggro: 10, heavy: true },
   screamer: { model: 'screamer', hp: 3, speed: 1.1, dmg: 5, range: 9, wind: .8, cd: 3.2, clip: 'scream', aggro: 13, stun: 1.7, keep: 6 },
 };
+/** Items. `stack` = how many fit in one slot; `heal` items are used up; `toggle` items switch on and off. */
 const ITEMS = {
-  bandage: { name: 'Bandage', heal: 25, note: 'A roll of bandage, still in its paper.' },
-  flower: { name: 'Pale Flower', heal: 45, note: 'Pale flowers, growing out of the stone. They smell of nothing. I know what they are for. I do not know how I know.' },
-  medkit: { name: 'First Aid Kit', heal: 80, note: 'A first aid kit. The seal is unbroken.' },
+  bandage: { name: 'Bandage', heal: 25, stack: 3, desc: 'Restores a little health.', note: 'A roll of bandage, still in its paper.' },
+  flower: { name: 'Pale Flower', heal: 45, stack: 3, desc: 'Restores some health.', note: 'Pale flowers, growing out of the stone. They smell of nothing. I know what they are for. I do not know how I know.' },
+  medkit: { name: 'First Aid Kit', heal: 80, desc: 'Restores most of your health.', note: 'A first aid kit. The seal is unbroken.' },
+  plank: { name: 'Wooden Plank', desc: 'A weapon. Always in hand.' },
+  flashlight: { name: 'Flashlight', toggle: true, desc: 'Use to switch it on or off.' },
 };
 /** Living monsters in the scene. */
 const monsters = () => Object.values(G.actors).filter(a => a.active && a.mon && a.mon.state !== 'dead');
@@ -3209,9 +3238,10 @@ function resetPlayer() {
   const pc = G.player.ch; pc.anim.clip = null; pc.anim.pose = null; pc.anim.pk = {}; pc.root.rotation.x = 0;
   Object.assign(G, { act: { type: null, t: 0 }, sta: CFG.maxSta, staDelay: 0, invuln: 0, hitstop: 0, shake: 0 });
 }
-/** Show what she is carrying: the plank in her hand, the attack button on touch screens. */
+/** Show what she is carrying: the plank in her hand, the flashlight on her chest, the attack button on touch screens. */
 function syncLoadout() {
   const has = !!G.flags['has.plank'];
+  G.player.ch.joints.lamp.visible = !!G.flags['has.light'];
   G.player.ch.joints.weapon.visible = has; $('#btnAtk').classList.toggle('hidden', !has);
 }
 /** Mnema cannot be hurt and nothing goes for her, but she is frightened all the same. */
@@ -3229,6 +3259,14 @@ const PICKUP_MESH = {
   medkit: () => pickupMesh(boxData(.36, .2, .24, { fit: true }), 'medkit'),
   flower: () => pickupMesh(appendData(quadData([-.3, 0, 0], [.3, 0, 0], [.3, .55, 0], [-.3, .55, 0]), quadData([0, 0, .3], [0, 0, -.3], [0, .55, -.3], [0, .55, .3])), 'paleflower'),
   plank: () => pickupMesh(boxData(.1, 1, .034, { uvm: [.5, 1] }), 'wood'),
+  flashlight() {   // lying on its side, still switched on, so it can be seen from down the road
+    const g = new THREE.Group(), lie = M(0, .04, 0, 0, Math.PI / 2);
+    g.add(pickupMesh(xform(loftData([{ y: -.1, r: .022 }, { y: .04, r: .022 }, { y: .06, r: .034 }, { y: .1, r: .034 }], 6, { capStart: true }), lie), 'iron'));
+    g.add(pickupMesh(xform(loftData([{ y: .1, r: .034 }, { y: .102, r: .002 }], 6), lie), 'glow'));
+    g.add(pickupMesh(xform(loftData([{ y: .1, r: .03, v: 1 }, { y: 1.8, r: .55, v: 0 }], 8), lie), 'beam'));
+    g.add(pickupMesh(quadData([-.15, .03, .1], [.15, .03, .1], [.8, .03, 2.4], [-.8, .03, 2.4]), 'cone'));
+    return g;
+  },
 };
 /** Create the scene's pickups (scene.pickups: [{ id, type, x, z, y?, ry?, rz? }]); taken ones stay hidden. */
 function buildPickups() {
@@ -3239,40 +3277,114 @@ function buildPickups() {
   }
 }
 async function takePickup(g, p) {
-  const touch = document.body.classList.contains('touch');
+  const touch = document.body.classList.contains('touch'), it = ITEMS[p.type];
+  if (!addItem(p.type)) return g.say('I have no room for that.');          // every slot is taken: it stays where it is
   G.flags['got.' + p.id] = true; p.mesh.visible = false; Sound.pickup();
   if (p.type === 'plank') {
     G.flags['has.plank'] = true; syncLoadout();
     await g.lines(['A plank, torn off a shutter. One end is split to a point.', 'I have no use for it. I take it anyway.']);
     return g.system(touch ? 'ATK: swing (hold for a heavy swing).  DODGE: dodge.' : 'J / left click: swing.   K / right click: heavy swing.   SPACE: dodge.');
   }
-  G.inv[p.type]++; const it = ITEMS[p.type];
+  if (p.type === 'flashlight') {
+    G.flags['has.light'] = true; G.light = true; syncLoadout();
+    await g.lines(['A flashlight, lying in the road. Still switched on.', 'The battery should be dead by now. It is not. I take it.']);
+    return g.system(touch ? 'ITEM: inventory. Use the flashlight there to switch it on or off.' : 'F: flashlight on / off.');
+  }
   if (!g.flag('seen.item.' + p.type)) { g.setFlag('seen.item.' + p.type); await g.say(it.note); }
   await g.system('Took: ' + it.name + '.   (' + (touch ? 'ITEM' : 'I') + ': inventory)');
 }
-function useItem(k) {
-  if (!G.inv[k]) return;
-  if (G.hp >= CFG.maxHp) { toast('No need for that now.'); return; }
-  G.inv[k]--; G.hp = Math.min(CFG.maxHp, G.hp + ITEMS[k].heal); Sound.heal(); toast(ITEMS[k].name + ' used.');
-}
 const hpState = () => G.hp > 60 ? ['FINE', '#72c98e', 1.1] : G.hp > 30 ? ['CAUTION', '#d6bf58', 1.5] : G.hp > 0 ? ['DANGER', '#d2564a', 2.2] : ['', '#d2564a', 0];
-const inventoryMenu = nested => ({
-  title: 'INVENTORY', panel: true, onBack() { if (!nested) { setState('play'); lockPointer(); } },
-  items: [
-    ...Object.keys(ITEMS).map(k => ({ label: ITEMS[k].name, value: () => 'x' + G.inv[k], disabled: () => !G.inv[k], select() { useItem(k); } })),
-    { label: 'Close', select() { Menu.back(); } },
-  ],
-  help: () => 'Condition: ' + hpState()[0] + '.   ' + (G.flags['has.plank'] ? 'Weapon: wooden plank.' : 'No weapon.') + '   Select an item to use it.',
-});
+
+// ---- inventory: a fixed number of slots, each holding one item or one stack
+const invCount = k => G.slots.reduce((n, s) => n + (s && s.k === k ? s.n : 0), 0);
+/** Put one item into a stack that has room, else into the first empty slot. False when there is no room. */
+function addItem(k) {
+  const s = G.slots.find(s => s && s.k === k && s.n < (ITEMS[k].stack || 1));
+  if (s) { s.n++; return true; }
+  const i = G.slots.indexOf(null); if (i < 0) return false;
+  G.slots[i] = { k, n: 1 }; return true;
+}
+/** Slots for a new game, or from a save (saves made before slots existed only have item counts). */
+function restoreSlots(save) {
+  G.slots = Array.from({ length: CFG.slots }, (_, i) => { const s = save && save.slots && save.slots[i]; return s && ITEMS[s.k] ? { k: s.k, n: s.n } : null; });
+  if (G.flags['has.plank'] && !invCount('plank')) addItem('plank');
+  if (save && !save.slots) for (const k in save.inv || {}) for (let n = save.inv[k]; n > 0; n--) addItem(k);
+}
+function useSlot(i) {
+  const s = G.slots[i], it = s && ITEMS[s.k];
+  if (!it) return;
+  if (it.toggle) { G.light = !G.light; Sound.ui('move'); return; }
+  if (!it.heal) { Sound.ui('back'); return; }
+  if (G.hp >= CFG.maxHp) { Sound.ui('back'); toast('No need for that now.'); return; }
+  if (--s.n <= 0) G.slots[i] = null;
+  G.hp = Math.min(CFG.maxHp, G.hp + it.heal); Sound.heal(); toast(it.name + ' used.');
+}
+/* 16x16 item icons, drawn once: rows of [colour, x, y, w, h]. */
+const ICON_ART = {
+  bandage: [['#d8d2c0', 3, 5, 10, 7], ['#b9b3a0', 3, 11, 10, 1], ['#f0ece0', 4, 6, 8, 2], ['#8a8474', 10, 8, 2, 3], ['#d8d2c0', 12, 11, 3, 2]],
+  flower: [['#5f7068', 7, 8, 2, 7], ['#5f7068', 5, 11, 2, 1], ['#5f7068', 9, 10, 2, 1], ['#d6e0f0', 5, 3, 6, 4], ['#d6e0f0', 6, 2, 4, 6], ['#f2f4fa', 7, 4, 2, 2]],
+  medkit: [['#5a5e60', 6, 2, 4, 2], ['#c2c6c2', 2, 4, 12, 9], ['#5a5e60', 2, 4, 12, 1], ['#9a2c2a', 7, 6, 2, 6], ['#9a2c2a', 5, 8, 6, 2]],
+  plank: Array.from({ length: 11 }, (_, i) => ['#8a745c', 2 + i, 11 - i, 3, 3]).concat(Array.from({ length: 11 }, (_, i) => ['#5c4c3c', 2 + i, 13 - i, 2, 1])),
+  flashlight: [['#4a4e56', 2, 7, 8, 3], ['#30343a', 2, 9, 8, 1], ['#6a6e76', 10, 6, 3, 5], ['#f0e6a8', 13, 6, 1, 5], ['#9a2c2a', 5, 6, 2, 1]],
+};
+const ICON = {};
+function itemIcon(k) {
+  if (!ICON[k]) {
+    const c = document.createElement('canvas'); c.width = c.height = 16; const ctx = c.getContext('2d');
+    for (const [col, x, y, w, h] of ICON_ART[k]) { ctx.fillStyle = col; ctx.fillRect(x, y, w, h); }
+    ICON[k] = c.toDataURL();
+  }
+  return ICON[k];
+}
+/** The inventory screen. Move with the direction keys, confirm to use; tap a slot to select it, tap again to use. */
+const Inventory = {
+  active: false, sel: 0, nested: false,
+  /** `nested` = opened from the pause menu, which it returns to. */
+  open(nested) {
+    this.active = true; this.nested = nested;
+    if (!G.slots[this.sel]) this.sel = Math.max(0, G.slots.findIndex(Boolean));
+    $('#menu').classList.add('hidden'); $('#inv').classList.remove('hidden'); this.render();
+  },
+  close() {
+    this.active = false; $('#inv').classList.add('hidden'); Sound.ui('back');
+    if (this.nested) Menu.render(); else { setState('play'); lockPointer(); }
+  },
+  move(i) { this.sel = i; Sound.ui('move'); this.render(); },
+  use() { useSlot(this.sel); this.render(); },
+  onButton(b) {
+    const n = G.slots.length, cols = 4;
+    if (b === 'left' || b === 'right') this.move((this.sel + (b === 'left' ? n - 1 : 1)) % n);
+    else if (b === 'up' || b === 'down') this.move((this.sel + (b === 'up' ? n - cols : cols)) % n);
+    else if (b === 'confirm') this.use();
+    else if (b === 'cancel' || b === 'pause' || b === 'inv') this.close();
+  },
+  render() {
+    const grid = $('.inv-grid'), cur = G.slots[this.sel], it = cur && ITEMS[cur.k];
+    grid.innerHTML = '';
+    G.slots.forEach((s, i) => {
+      const el = document.createElement('div'); el.className = 'slot' + (i === this.sel ? ' sel' : '');
+      if (s) {
+        const d = ITEMS[s.k], img = document.createElement('img'), tag = document.createElement('i');
+        img.src = itemIcon(s.k); img.alt = d.name; tag.textContent = d.toggle ? (G.light ? 'ON' : 'OFF') : d.stack ? 'x' + s.n : '';
+        el.append(img, tag);
+      }
+      el.addEventListener('click', e => { e.stopPropagation(); Sound.unlock(); if (i === this.sel && s) this.use(); else this.move(i); });
+      grid.appendChild(el);
+    });
+    $('.inv-info b').textContent = it ? it.name : 'Empty'; $('.inv-info span').textContent = it ? it.desc : '';
+    $('#invUse').classList.toggle('dis', !it || !(it.heal || it.toggle));
+    $('#inv .menu-help').textContent = 'Condition: ' + hpState()[0] + '.   Slots: ' + G.slots.filter(Boolean).length + ' / ' + G.slots.length + '.';
+  },
+};
 const deathMenu = () => ({ items: [{ label: 'Retry', select() { retry(); } }, { label: 'Quit to Title', select() { quitToTitle(); } }] });
-function openInventory() { if (G.state !== 'play') return; Sound.ui('ok'); setState('paused'); unlockPointer(); Menu.open(inventoryMenu()); }
+function openInventory() { if (G.state !== 'play') return; Sound.ui('ok'); setState('paused'); unlockPointer(); Inventory.open(false); }
 
 // ---- lights, effects, HUD
 /** Lamps of a scene: env.lamps, or the single classic lamp. `steady` lamps do not flicker. */
 function envLamps(env) { return env.lamps || [{ pos: env.lampPos, col: env.lampCol, r: env.lampR }]; }
 /** Leta's flashlight, and the street lamp that lights the characters (whichever is nearest to her). */
 function updateLights() {
-  const p = G.player, sy = Math.sin(p.heading), cy = Math.cos(p.heading), on = G.light && G.camMode === 'game', k = on ? (G.scene.def.env.flash ?? .5) : 0;
+  const p = G.player, sy = Math.sin(p.heading), cy = Math.cos(p.heading), on = G.light && !!G.flags['has.light'] && G.camMode === 'game', k = on ? (G.scene.def.env.flash ?? .5) : 0;
   SHARED.uFlashPos.value.set(p.x + sy * .2, 1.28, p.z + cy * .2); SHARED.uFlashDir.value.set(sy * .985, -.17, cy * .985);
   SHARED.uFlashCol.value.set(1.05 * k, .98 * k, .8 * k); p.ch.joints.beam.visible = on;
   let best = null, bd = 1e9;
@@ -3316,6 +3428,8 @@ function initCombatInput() {
   atk.addEventListener('pointerup', e => { e.preventDefault(); playerAct(performance.now() - t0 > 320 ? 'heavy' : 'light'); });   // hold = heavy
   $('#btnDodge').addEventListener('pointerdown', e => { e.preventDefault(); Sound.unlock(); onButton('dodge'); });
   $('#btnInv').addEventListener('pointerdown', e => { e.preventDefault(); Sound.unlock(); onButton('inv'); });
+  $('#invUse').addEventListener('click', e => { e.stopPropagation(); Sound.unlock(); Inventory.use(); });
+  $('#invClose').addEventListener('click', e => { e.stopPropagation(); Sound.unlock(); Inventory.close(); });
 }
 
 /* ============================== 15. BOOT ============================== */
@@ -3335,7 +3449,7 @@ function boot() {
     $('#boot').classList.add('hidden');
     showTitle();
   }
-  window.ASPHODEL = { G, THREE, SCENES, CHAPTERS, CHARACTERS, Settings, SaveSystem, Script, Input, Dialogue, camera, scene, canStand, registerScene, registerChapter, playerAct, damagePlayer, spawnMonster, monsters, MON };   // console / test hook
+  window.ASPHODEL = { G, THREE, SCENES, CHAPTERS, CHARACTERS, Settings, SaveSystem, Script, Input, Dialogue, camera, scene, canStand, registerScene, registerChapter, playerAct, damagePlayer, spawnMonster, monsters, MON, Inventory, addItem };   // console / test hook
   requestAnimationFrame(frame);
 }
 try { boot(); } catch (e) { console.error(e); $('#boot').classList.remove('hidden'); $('#boot').textContent = 'Could not start: ' + e.message; }
