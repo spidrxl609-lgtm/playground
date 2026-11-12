@@ -24,11 +24,12 @@ python3 -m http.server 8000   # then open http://localhost:8000
 | Heavy swing | K or right click | Y | hold ATK |
 | Dodge | Space | B | DODGE |
 | Inventory | I or Tab | Back | ITEM |
-| Flashlight | F | LB | — |
+| Flashlight (once found) | F | LB | use it in the inventory |
 | Pause | Esc | Start | II |
 
-Health is shown as a heart trace (Fine / Caution / Danger) with a stamina bar under it. Bandages, pale
-flowers and first aid kits are used from the inventory. Progress is saved at pay phones, at checkpoints and
+Health is shown as a heart trace (Fine / Caution / Danger) with a stamina bar under it. The inventory has
+eight slots: bandages and pale flowers stack three to a slot, and the plank, the flashlight and each first
+aid kit take one. Select a slot and confirm (or tap it twice) to use the item. Progress is saved at pay phones, at checkpoints and
 on every chapter transition (localStorage); dying offers a retry from the last save.
 
 ## Extending
